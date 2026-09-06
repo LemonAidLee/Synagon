@@ -1,0 +1,267 @@
+# ==============================================================================
+# AI Orchestrator Configuration
+# ==============================================================================
+# Define agents, models, roles, and responsibilities for the workflow.
+#
+# Concept Hierarchy:
+#   Agent          → The execution provider / binary (antigravity, claude, opencode)
+#   Model          → The specific model selected from that provider
+#   Role           → The functional responsibility category in the pipeline
+#   Responsibility → Specific instructions and expectations associated with that role
+#   AgentResult    → Standardized output record produced by an agent execution
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# Active Agent Assignments
+# ------------------------------------------------------------------------------
+agents:
+  - agent: antigravity
+    model: gemini-3.8-flash-high
+    role: researcher
+
+  - agent: claude
+    model: sonnet
+    role: planner
+
+  - agent: opencode
+    model: opencode/big-pickle
+    role: implementer
+
+  - agent: claude
+    model: sonnet
+    role: verifier
+
+# ------------------------------------------------------------------------------
+# Self-Repair Configuration
+# ------------------------------------------------------------------------------
+# Maximum number of automatic repair attempts when verification fails (default: 2)
+# 0 = no automatic repair (fail ends immediately, Stage 6 behavior)
+# 1 = one repair attempt
+# 2 = two repair attempts
+max_repair_attempts: 2
+
+# ------------------------------------------------------------------------------
+# Execution Settings (Stage 7.5)
+# ------------------------------------------------------------------------------
+# Controls process launching, visibility, and execution mode (Stage 7.5.2).
+# visible_terminals: false      # When true, each agent execution runs visibly in its own terminal window.
+# terminal_type: auto           # "auto", "antigravity_integrated", "windows_terminal", or "console"
+# pause_on_completion: 1.5      # Seconds to pause visible window upon completion before closing
+# agent_execution_mode: auto    # "auto" (prefer native TUI where supported, headless fallback),
+#                               # "native_tui" (strictly require native TUI),
+#                               # "headless" (standard non-interactive CLI mode)
+execution:
+  visible_terminals: true
+  terminal_type: antigravity_integrated
+  pause_on_completion: 1.5
+  agent_execution_mode: auto
+
+# ------------------------------------------------------------------------------
+# Global Skill Discovery & Access Configuration (Stage 7.7)
+# ------------------------------------------------------------------------------
+# Configures passive discovery of modular agent skills.
+# Discovered skills are made visible to ALL agents regardless of role.
+# Search paths resolve relative to the current project root.
+# ------------------------------------------------------------------------------
+skills:
+  enabled: true
+  search_paths:
+    - ./skills
+    - ./.agents/skills
+
+# ------------------------------------------------------------------------------
+# Preflight Probing (Tier 1 #6)
+# ------------------------------------------------------------------------------
+# Probes every configured agent BEFORE any of them is launched, so an unusable
+# environment fails in seconds instead of several minutes into a run.
+#
+# Checks per agent: the orchestrator has a runner for it, its CLI binary resolves
+# on this machine, its model is in the catalog, and its role has a responsibility.
+#
+#   enabled          Run preflight at the start of every workflow.
+#   strict           Halt the run when a check of error severity fails.
+#   deep             Also invoke each binary's --version (one subprocess per agent).
+#   timeout_seconds  Seconds allowed per deep version probe.
+#
+# Probe on demand without running a task:  python -m orchestrator --doctor
+# Skip for one run:                        python -m orchestrator "..." --no-preflight
+# ------------------------------------------------------------------------------
+preflight:
+  enabled: true
+  strict: true
+  deep: false
+  timeout_seconds: 15
+
+# ------------------------------------------------------------------------------
+# Durable Run Store (Tier 1 #4)
+# ------------------------------------------------------------------------------
+# Persists every run to disk as it executes, so a run's history outlives the
+# process that produced it. Each run gets its own directory containing run.json
+# (metadata) and events.jsonl (append-only event log).
+#
+#   enabled           Record runs to disk.
+#   directory         Runs directory, relative to project root or absolute.
+#   max_output_chars  Truncate each stored agent output to this many characters.
+#                     0 means unlimited (recommended: full outputs are the point).
+#
+# Store failures never fail a run; they degrade to a warning.
+#
+# List runs:  python -m orchestrator --runs
+# Show one:   python -m orchestrator --show-run latest
+# ------------------------------------------------------------------------------
+run_store:
+  enabled: true
+  directory: .orchestrator/runs
+  max_output_chars: 0
+
+# ------------------------------------------------------------------------------
+# Workspace Isolation (Tier 0 #3)
+# ------------------------------------------------------------------------------
+# Runs each task in its own git worktree on its own branch, so the implementer
+# and its repair attempts never write your checkout. Agent work becomes a diff
+# you can review, merge, or throw away.
+#
+#   isolation         "auto"     - isolate when git can provide it, otherwise warn
+#                                  and run in the project directory
+#                     "worktree" - require isolation; refuse to run without it
+#                     "none"     - agents edit the project directory directly
+#   directory         Worktrees directory, relative to project root or absolute.
+#   commit_on_finish  Commit the run's changes onto its branch when the run ends,
+#                     so the work survives worktree cleanup and reads as a diff.
+#   keep_worktree     Leave the worktree on disk after the run.
+#
+# The orchestrator never merges automatically and never force-deletes a worktree
+# holding uncommitted work.
+#
+# Override per run:  --isolate worktree | --isolate none | --no-isolate
+# ------------------------------------------------------------------------------
+workspace:
+  isolation: auto
+  directory: .orchestrator/worktrees
+  commit_on_finish: true
+  keep_worktree: true
+
+# ------------------------------------------------------------------------------
+# Verification Consensus (Tier 2 #8)
+# ------------------------------------------------------------------------------
+# When several 'verifier' agents are configured consecutively they run in
+# parallel as a quorum, and their verdicts are resolved by this policy.
+#
+#   unanimous  Every verifier must return PASS to pass. Preserves the fail-safe
+#              contract: a dissenting or ambiguous verifier can never be
+#              outvoted into a false PASS. (default)
+#   majority   A strict majority of PASS verdicts passes.
+#   any        A single PASS passes. Weakest setting.
+#
+# A BLOCKED verdict from any verifier always wins: if one says a human is
+# needed, that is true regardless of what the others concluded.
+# ------------------------------------------------------------------------------
+verification:
+  consensus: unanimous
+
+
+# ------------------------------------------------------------------------------
+# Model Catalog
+# ------------------------------------------------------------------------------
+# Human-friendly reference and validation catalog for configured providers.
+# The 'id' is passed directly to the provider CLI.
+# The 'name' is for human readability and inspection.
+#
+# OpenCode note: OpenCode supports arbitrary providers using 'provider/model'
+# format. You can add new or custom models directly here without editing Python.
+# ------------------------------------------------------------------------------
+models:
+
+  antigravity:
+    - id: gemini-3.8-flash-high
+      name: Gemini 3.8 Flash (High)
+
+    - id: gemini-3.8-flash-medium
+      name: Gemini 3.8 Flash (Medium)
+
+    - id: gemini-3.8-flash-low
+      name: Gemini 3.8 Flash (Low)
+
+    - id: gemini-3.7-flash-high
+      name: Gemini 3.7 Flash (High)
+
+    - id: gemini-3.7-flash-medium
+      name: Gemini 3.7 Flash (Medium)
+
+    - id: gemini-3.7-flash-low
+      name: Gemini 3.7 Flash (Low)
+
+    - id: gemini-3.6-flash-high
+      name: Gemini 3.6 Flash (High)
+
+    - id: gemini-3.6-flash-medium
+      name: Gemini 3.6 Flash (Medium)
+
+    - id: gemini-3.1-pro-high
+      name: Gemini 3.1 Pro (High)
+
+    - id: claude-sonnet-4-6
+      name: Claude Sonnet 4.6 (Thinking)
+
+    - id: claude-opus-4-6-thinking
+      name: Claude Opus 4.6 (Thinking)
+
+    - id: gpt-oss-120b-medium
+      name: GPT-OSS 120B (Medium)
+
+  claude:
+    - id: sonnet
+      name: Claude Sonnet (CLI alias)
+
+    - id: opus
+      name: Claude Opus (CLI alias)
+
+    - id: haiku
+      name: Claude Haiku (CLI alias)
+
+  opencode:
+    # OpenCode supports arbitrary providers and models using 'provider/model' format.
+    # Add any provider/model identifier here to validate and select it.
+    - id: opencode/big-pickle
+      name: Big Pickle (OpenCode)
+
+    - id: opencode/gpt-5.1-codex
+      name: GPT-5.1 Codex via OpenCode
+
+    - id: anthropic/claude-sonnet-4-5
+      name: Claude Sonnet 4.5 via Anthropic
+
+    - id: google/gemini-3-pro
+      name: Gemini 3 Pro via Google
+
+    - id: custom/my-model
+      name: Custom / user-defined model
+
+# ------------------------------------------------------------------------------
+# Role Definitions & Responsibilities
+# ------------------------------------------------------------------------------
+roles:
+  researcher:
+    responsibility: >-
+      Investigate and analyze the supplied project context and user task.
+      Provide project-specific observations, identify structural gaps, and
+      outline areas for deeper technical inspection.
+
+  planner:
+    responsibility: >-
+      Review the user task, project context, and researcher findings.
+      Formulate concrete, prioritized planning recommendations, architectural
+      decisions, and actionable next steps.
+
+  implementer:
+    responsibility: >-
+      Implement the approved architectural and code changes directly in the
+      workspace with clean, maintainable modifications.
+
+  verifier:
+    responsibility: >-
+      Verify the implementation against the original user task,
+      project context, research findings, planning recommendations,
+      and implementation result. Execute relevant tests when appropriate,
+      identify regressions or errors, and return a clear PASS or FAIL
+      verdict with supporting findings.

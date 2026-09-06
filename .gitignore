@@ -1,0 +1,28 @@
+# Python virtual environment
+.venv/
+venv/
+ENV/
+
+# Python cache & build artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+
+# Environment variables & secrets
+.env
+.env.*
+!.env.example
+
+# LangGraph runtime & local artifacts
+.langgraph/
+*.log
+
+# Editor / IDE
+.vscode/
+.idea/
+
+# Durable run store (Tier 1 #4) - local run history, not source
+.orchestrator/

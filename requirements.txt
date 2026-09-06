@@ -1,0 +1,12 @@
+# Core LangGraph framework & local dev server
+langgraph
+langgraph-cli[inmem]
+
+# Model provider integrations
+langchain-anthropic
+langchain-google-genai
+langchain-openai
+
+# Configuration & environment management
+python-dotenv
+colorama  # Required on Windows for colored console logging
