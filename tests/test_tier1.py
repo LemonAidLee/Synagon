@@ -610,8 +610,12 @@ class TestTier1Integration(unittest.TestCase):
             "project_root": os.getcwd(),
             "run_store_enabled": False,
             "agent_results": [],
+            # Pin the workspace so these tests never create a real git worktree.
+            "workspace": {"isolated": False, "path": os.getcwd()},
         }
         state.update(extra_state or {})
+        if "project_root" in (extra_state or {}):
+            state["workspace"] = {"isolated": False, "path": state["project_root"]}
         with patch.object(graph_module, "run_antigravity", return_value="analysis"), \
              patch.object(graph_module, "run_claude_code", side_effect=claude_outputs), \
              patch.object(graph_module, "run_opencode", return_value="implementation"):
@@ -676,6 +680,7 @@ class TestTier1Integration(unittest.TestCase):
                     "project_root": os.getcwd(),
                     "run_store_enabled": False,
                     "agent_results": [],
+                    "workspace": {"isolated": False, "path": os.getcwd()},
                 }
             )
 
@@ -701,6 +706,7 @@ class TestTier1Integration(unittest.TestCase):
             "task": "record me",
             "project_root": self.tmp,
             "agent_results": [],
+            "workspace": {"isolated": False, "path": self.tmp},
         }
         with patch.object(graph_module, "run_antigravity", return_value="analysis"), \
              patch.object(graph_module, "run_claude_code", side_effect=["plan", "VERDICT: PASS\nok"]), \

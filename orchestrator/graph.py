@@ -399,10 +399,14 @@ def make_role_node(role_name: str, agent_index: Optional[int] = None, is_repair:
 
         existing_results = list(state.get("agent_results") or [])
         repair_attempts = state.get("repair_attempts", 0)
-        
+
+        # A model may be an escalation ladder: rung 0 for the initial attempt,
+        # rung N for repair attempt N. A repair node is executing attempt
+        # `repair_attempts + 1`, so it must escalate now rather than repeat the
+        # model that just failed.
         if isinstance(model_name, list):
-            model_index = min(repair_attempts, len(model_name) - 1)
-            model_name = model_name[model_index]
+            attempt_index = (repair_attempts + 1) if is_repair else 0
+            model_name = model_name[min(attempt_index, len(model_name) - 1)]
         task = state.get("task") or state.get("message", "")
         project_context = state.get("project_context", "(No project context supplied)")
         # Agents execute in the run's isolated worktree when there is one.

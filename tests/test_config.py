@@ -388,6 +388,7 @@ class TestConfigWorkflowPropagation(unittest.TestCase):
                 "task": "Test custom model propagation",
                 "project_root": os.getcwd(),
                 "run_store_enabled": False,
+                "workspace": {"isolated": False, "path": os.getcwd()},
                 "config_path": temp_path,
             }
             result = graph.invoke(initial_state)

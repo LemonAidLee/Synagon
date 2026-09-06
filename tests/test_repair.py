@@ -129,6 +129,7 @@ class TestRepairWorkflow(unittest.TestCase):
             "task": "Build feature A",
             "project_root": os.getcwd(),
             "run_store_enabled": False,
+            "workspace": {"isolated": False, "path": os.getcwd()},
         })
 
         self.assertEqual(result["status"], "completed")
@@ -161,6 +162,7 @@ class TestRepairWorkflow(unittest.TestCase):
             "task": "Fix the formula in calc.py",
             "project_root": os.getcwd(),
             "run_store_enabled": False,
+            "workspace": {"isolated": False, "path": os.getcwd()},
             "max_repair_attempts": 2,
         })
 
@@ -206,6 +208,7 @@ class TestRepairWorkflow(unittest.TestCase):
             "task": "Fix difficult bug",
             "project_root": os.getcwd(),
             "run_store_enabled": False,
+            "workspace": {"isolated": False, "path": os.getcwd()},
             "max_repair_attempts": 2,
         })
 
@@ -236,6 +239,7 @@ class TestRepairWorkflow(unittest.TestCase):
             "task": "Test zero repairs mode",
             "project_root": os.getcwd(),
             "run_store_enabled": False,
+            "workspace": {"isolated": False, "path": os.getcwd()},
             "max_repair_attempts": 0,
         })
 
@@ -270,6 +274,7 @@ class TestRepairWorkflow(unittest.TestCase):
             "task": "Test unknown verdict safety",
             "project_root": os.getcwd(),
             "run_store_enabled": False,
+            "workspace": {"isolated": False, "path": os.getcwd()},
             "max_repair_attempts": 1,
         })
 
@@ -297,6 +302,7 @@ class TestRepairWorkflow(unittest.TestCase):
             "task": "Test history preservation",
             "project_root": os.getcwd(),
             "run_store_enabled": False,
+            "workspace": {"isolated": False, "path": os.getcwd()},
             "max_repair_attempts": 2,
         })
 

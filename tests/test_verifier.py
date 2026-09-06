@@ -110,6 +110,7 @@ class TestVerifierWorkflow(unittest.TestCase):
             "task": "Implement feature X and verify",
             "project_root": os.getcwd(),
             "run_store_enabled": False,
+            "workspace": {"isolated": False, "path": os.getcwd()},
         }
         result = graph.invoke(initial_state)
 
@@ -163,6 +164,7 @@ class TestVerifierWorkflow(unittest.TestCase):
             "task": "Implement feature Y and verify",
             "project_root": os.getcwd(),
             "run_store_enabled": False,
+            "workspace": {"isolated": False, "path": os.getcwd()},
             "max_repair_attempts": 0,
         }
         result = graph.invoke(initial_state)
@@ -190,7 +192,7 @@ class TestVerifierWorkflow(unittest.TestCase):
         mock_opencode.return_value = "Mock implementation"
         mock_claude.side_effect = ["Mock plan", "VERDICT: PASS\nAll good."]
 
-        initial_state = {"task": "Verify trace sequence", "project_root": os.getcwd()}
+        initial_state = {"task": "Verify trace sequence", "project_root": os.getcwd(), "workspace": {"isolated": False, "path": os.getcwd()}}
         graph.invoke(initial_state)
 
         events = default_tracer.get_events()
@@ -200,7 +202,6 @@ class TestVerifierWorkflow(unittest.TestCase):
             "context_started",
             "context_completed",
             "run_store_opened",
-            "workspace_not_isolated",
             "preflight_started",
             "preflight_completed",
             "antigravity_started",

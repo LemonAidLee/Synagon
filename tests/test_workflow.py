@@ -30,6 +30,7 @@ class TestWorkflow(unittest.TestCase):
             "task": task,
             "project_root": os.getcwd(),
             "run_store_enabled": False,
+            "workspace": {"isolated": False, "path": os.getcwd()},
         }
 
         result = graph.invoke(initial_state)
@@ -145,7 +146,7 @@ class TestWorkflow(unittest.TestCase):
         mock_claude.side_effect = ["Mock review", "VERDICT: PASS\nAll verified."]
         mock_opencode.return_value = "Mock implementation"
 
-        initial_state = {"task": "Verify trace sequence", "project_root": os.getcwd()}
+        initial_state = {"task": "Verify trace sequence", "project_root": os.getcwd(), "workspace": {"isolated": False, "path": os.getcwd()}}
         graph.invoke(initial_state)
 
         events = default_tracer.get_events()
@@ -155,7 +156,6 @@ class TestWorkflow(unittest.TestCase):
             "context_started",
             "context_completed",
             "run_store_opened",
-            "workspace_not_isolated",
             "preflight_started",
             "preflight_completed",
             "antigravity_started",
@@ -201,7 +201,7 @@ class TestWorkflow(unittest.TestCase):
         """Test safe error handling when an agent node fails."""
         mock_antigravity.side_effect = RuntimeError("Simulated CLI failure")
 
-        initial_state = {"task": "Test error handling", "project_root": os.getcwd(), "run_store_enabled": False}
+        initial_state = {"task": "Test error handling", "project_root": os.getcwd(), "run_store_enabled": False, "workspace": {"isolated": False, "path": os.getcwd()}}
         result = graph.invoke(initial_state)
 
         self.assertEqual(result["status"], "error")
@@ -242,7 +242,7 @@ class TestWorkflow(unittest.TestCase):
         mock_claude.return_value = "Mock review"
         mock_opencode.side_effect = RuntimeError("Simulated OpenCode failure")
 
-        initial_state = {"task": "Test OpenCode error handling", "project_root": os.getcwd(), "run_store_enabled": False}
+        initial_state = {"task": "Test OpenCode error handling", "project_root": os.getcwd(), "run_store_enabled": False, "workspace": {"isolated": False, "path": os.getcwd()}}
         result = graph.invoke(initial_state)
 
         self.assertEqual(result["status"], "error")
@@ -276,6 +276,7 @@ class TestWorkflow(unittest.TestCase):
             "task": "Test visible terminal parameters",
             "project_root": os.getcwd(),
             "run_store_enabled": False,
+            "workspace": {"isolated": False, "path": os.getcwd()},
             "visible_terminals": True,
             "pause_on_completion": 0.0,
         }
@@ -315,6 +316,7 @@ class TestLiveWorkflow(unittest.TestCase):
             "task": "Reply in 1 sentence: What is the primary benefit of type hints in Python?",
             "project_root": os.getcwd(),
             "run_store_enabled": False,
+            "workspace": {"isolated": False, "path": os.getcwd()},
         }
         result = graph.invoke(initial_state)
 
@@ -334,6 +336,7 @@ class TestLiveWorkflow(unittest.TestCase):
             "task": "Reply in 1 sentence: What is the primary benefit of type hints in Python?",
             "project_root": os.getcwd(),
             "run_store_enabled": False,
+            "workspace": {"isolated": False, "path": os.getcwd()},
             "visible_terminals": True,
             "pause_on_completion": 0.5,
         }

@@ -316,6 +316,8 @@ class TestAgentResultAndWorkflowIntegration(unittest.TestCase):
                 "task": "Create greeting function",
                 "project_root": tmp_dir,
                 "agent_execution_mode": "auto",
+                "run_store_enabled": False,
+                "workspace": {"isolated": False, "path": tmp_dir},
             }
 
             final_state = graph.invoke(state)
