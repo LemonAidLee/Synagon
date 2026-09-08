@@ -7,6 +7,17 @@ from colorama import Fore, Style, init
 
 import json
 from orchestrator.acceptance import describe_check
+from orchestrator.archive import (
+    execute_archive,
+    execute_restore,
+    format_archive_plan,
+    format_archive_result,
+    format_archived_list,
+    format_restore_result,
+    list_archived,
+    plan_archive,
+    plan_restore,
+)
 from orchestrator.approvals import (
     GATE_BEFORE_MERGE,
     STATUS_APPROVED,
@@ -602,6 +613,44 @@ def main() -> int:
             "Delete old orchestrator run branches (and their leftover worktrees) "
             "and exit. Shows the plan and asks before deleting anything."
         ),
+    )
+    parser.add_argument(
+        "--archive-runs",
+        action="store_true",
+        dest="archive_runs",
+        default=False,
+        help=(
+            "Move runs in which no agent was really invoked out of the run store and into "
+            ".orchestrator/archive/runs, so that --stats, the board and the planner's "
+            "memory stop reading them. Shows the plan and asks first. Nothing is deleted; "
+            "--restore-runs puts them back."
+        ),
+    )
+    parser.add_argument(
+        "--matching",
+        dest="matching",
+        default=None,
+        help=(
+            "With --archive-runs, also archive runs whose task contains this text. "
+            "Combines with the synthetic test rather than replacing it."
+        ),
+    )
+    parser.add_argument(
+        "--restore-runs",
+        nargs="*",
+        dest="restore_runs",
+        default=None,
+        help=(
+            "Move archived runs back into the store (all of them, or the ids/prefixes "
+            "named). A run whose id is already in the store is reported, never overwritten."
+        ),
+    )
+    parser.add_argument(
+        "--archived",
+        action="store_true",
+        dest="archived",
+        default=False,
+        help="List the runs currently held in the archive, and when each was archived.",
     )
     parser.add_argument(
         "--older-than",
@@ -1282,6 +1331,100 @@ def main() -> int:
         safe_print(format_memory(memory))
         safe_print("")
         return 0
+
+    # --- The archive: retention over the run store itself -------------------
+    #
+    # `--prune-runs` below deletes branches. This does not delete anything: it moves runs
+    # that were never really run out of the dataset every projection reads, and
+    # `--restore-runs` moves them back. The store is evidence, and evidence is corrected
+    # by being set aside with a reason attached, not by being destroyed.
+    if args.archived:
+        try:
+            root = get_project_root(args.project_root or os.getcwd())
+        except Exception as exc:
+            safe_print(f"{Fore.RED}Error: {exc}{Style.RESET_ALL}")
+            return 1
+        safe_print(f"\n{Fore.CYAN}{Style.BRIGHT}ARCHIVED RUNS{Style.RESET_ALL}\n")
+        safe_print(format_archived_list(list_archived(root)))
+        safe_print("")
+        return 0
+
+    if args.restore_runs is not None:
+        try:
+            root = get_project_root(args.project_root or os.getcwd())
+            config = load_config(args.config_path, root)
+        except Exception as exc:
+            safe_print(f"{Fore.RED}Error: {exc}{Style.RESET_ALL}")
+            return 1
+
+        runs_dir = get_run_store_config(config).get("directory")
+        plan = plan_restore(root, run_ids=args.restore_runs, runs_directory=runs_dir)
+        if not plan.get("available"):
+            safe_print(f"{Fore.YELLOW}Cannot restore: {plan.get('reason')}{Style.RESET_ALL}\n")
+            return 1
+
+        selected = plan.get("selected") or []
+        conflicts = plan.get("conflicts") or []
+        safe_print(f"\n{Fore.CYAN}{Style.BRIGHT}RESTORE ARCHIVED RUNS{Style.RESET_ALL}\n")
+        safe_print(f"  {len(selected)} to restore into {plan.get('store_dir')}")
+        for c in conflicts:
+            safe_print(f"  {Fore.YELLOW}{c['run_id']}: {c['error']}{Style.RESET_ALL}")
+        if not selected:
+            safe_print(f"\n{Fore.GREEN}Nothing to restore.{Style.RESET_ALL}\n")
+            return 0 if not conflicts else 1
+        if args.dry_run:
+            safe_print(f"\n{Fore.LIGHTBLACK_EX}--dry-run: nothing was moved.{Style.RESET_ALL}\n")
+            return 0
+
+        result = execute_restore(plan)
+        safe_print("")
+        safe_print(format_restore_result(result))
+        safe_print("")
+        return 0 if not result.get("failed") and not conflicts else 1
+
+    if args.archive_runs:
+        try:
+            root = get_project_root(args.project_root or os.getcwd())
+            config = load_config(args.config_path, root)
+        except Exception as exc:
+            safe_print(f"{Fore.RED}Error: {exc}{Style.RESET_ALL}")
+            return 1
+
+        runs_dir = get_run_store_config(config).get("directory")
+        plan = plan_archive(root, matching=args.matching, runs_directory=runs_dir)
+        safe_print(f"\n{Fore.CYAN}{Style.BRIGHT}ARCHIVE RUN RECORDS{Style.RESET_ALL}\n")
+        safe_print(format_archive_plan(plan, show_kept=False))
+        safe_print("")
+
+        if not plan.get("available"):
+            return 1
+        if not plan.get("selected"):
+            safe_print(f"{Fore.GREEN}Nothing to archive.{Style.RESET_ALL}\n")
+            return 0
+        if args.dry_run:
+            safe_print(f"{Fore.LIGHTBLACK_EX}--dry-run: nothing was moved.{Style.RESET_ALL}\n")
+            return 0
+
+        # Archiving is reversible, so this asks rather than refuses - but it still asks,
+        # because what changes underneath is every number this project reports about itself.
+        if not args.assume_yes:
+            if not sys.stdin or not sys.stdin.isatty():
+                safe_print(
+                    f"{Fore.YELLOW}Refusing to move runs without confirmation. "
+                    f"Re-run with --yes (or --dry-run to preview).{Style.RESET_ALL}\n"
+                )
+                return 1
+            answer = (
+                input(f"Archive {len(plan['selected'])} run(s)? [y/N] ").strip().lower()
+            )
+            if answer not in ("y", "yes"):
+                safe_print("Aborted; nothing was moved.\n")
+                return 0
+
+        result = execute_archive(root, plan)
+        safe_print(format_archive_result(result))
+        safe_print("")
+        return 0 if not result.get("failed") else 1
 
     # --- Retention sweep over run branches (Tier 0 #3) ---------------------
     if args.prune_runs:

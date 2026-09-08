@@ -685,6 +685,72 @@ Two rules keep the report honest: runs whose token usage is incomplete are **exc
 cost statistics and that exclusion is printed; and every rate carries its denominator, with
 samples below five flagged — a 100% pass rate over two runs is not a fact about a model.
 
+### 11.4 The archive — correcting the store without destroying it
+
+Those two rules keep the *report* honest and can do nothing about the *dataset*. For most of
+this project's life the test suite wrote real run records into the developer's own
+`.orchestrator/runs`. `tests/support.py` stopped that (§29) but could not un-write what was
+already there: **141 synthetic runs against 23 real ones — 86% of the store.** Everything
+downstream read them and reported them faithfully. The board drew 126 `Ready to Merge` cards
+for pipeline runs that never ran; `--stats` scored one agent over 324 executions that were
+mocks; §27's planner memory and §21.0's evidence-beside-the-choice were computed from the same
+numbers. None of that was a bug. Each was a correct projection of a corrupt store, which is
+the more dangerous shape of the problem: nothing anywhere reported an error.
+
+`archive.py` is the correction, and its one design commitment is that **it does not delete**.
+A run record is evidence. The reason to take one out of the store is never that its history is
+worthless — it is that it is not evidence *about this project*, and every projection is being
+told otherwise. So a run is **moved**, whole, into `.orchestrator/archive/runs/<run_id>/`, and
+`--restore-runs` moves it back byte-for-byte. The only filesystem verb in the module, in both
+directions, is a move.
+
+```bash
+python -m orchestrator --archive-runs --dry-run   # the plan, and nothing else
+python -m orchestrator --archive-runs             # ask, then move
+python -m orchestrator --archived                 # what is in the archive, and why
+python -m orchestrator --restore-runs             # all of it back, or name ids
+```
+
+**What counts as synthetic is evidence, not a guess.** Matching the task text would have
+worked exactly once, on this repository, for the string those particular tests happened to
+use. A run is judged instead on two independent facts that one real agent invocation cannot
+both produce:
+
+| | Synthetic | Real |
+| --- | --- | --- |
+| Token usage reported by any execution | never | always, in all 23 |
+| Slowest single execution | ≤ 0.88s | ≥ 8.26s |
+
+Both must hold before a run is selected, and a run that recorded **no** executions is never
+synthetic — that is an interrupted run, which is real. Requiring both is what keeps a genuine
+run whose agents all failed to report usage (which invariant 5 explicitly permits) out of the
+archive. `SYNTHETIC_MAX_EXECUTION_SECONDS` is 2.0s, sitting in a gap the two populations do
+not come close to touching. `--matching TEXT` adds a second, explicit selector for the cases
+evidence cannot reach; it combines with the synthetic test rather than replacing it.
+
+Three rules, each the archive's answer to a way this could have gone wrong:
+
+* **The plan is shown before anything moves**, and an interactive terminal is asked to
+  confirm — the same shape as `--prune-runs` (§7.3), because what changes underneath is every
+  number this project reports about itself.
+* **An archived run says why it was archived.** `archived.json` inside it records the
+  timestamp, the reason, and the evidence the judgement rested on, so the decision can be
+  argued with a year later. Restoring deletes that sidecar, so a restored run carries no trace
+  of having been archived.
+* **A restore never overwrites.** A run whose id is already in the store is reported as a
+  conflict and left in the archive. The store is append-only, and clobbering a live run is the
+  one way this module could destroy something.
+
+Nothing else reads the archive. It is out of the store, and that is the entire point.
+
+**What the clean store then said**, which is the half worth keeping: with the mocks gone,
+`--stats` puts the researcher role's Antigravity pairing at a **90% error rate over 10 runs** —
+the failure §9.0 diagnosed by hand, sitting in the data all along and drowned out by 141 runs
+that never called a provider. The same read corrects a claim made from the polluted store: the
+Claude researcher has **3** recorded runs here, not 20, which is below the five-observation
+line `--stats` flags. The reassignment was right; the evidence offered for it was inflated,
+and that is exactly the class of error a corrupt dataset produces.
+
 ---
 
 ## 12. Token accounting
@@ -1716,6 +1782,7 @@ stops emitting that pair.
 | `preflight.py` | Agent probing and the readiness report. |
 | `workspace.py` | Worktree creation, commit, retention, reattachment, branch listing. |
 | `prune.py` | The retention sweep and its plan/execute split, including the shorter threshold a merged branch answers to. |
+| `archive.py` | Retention for the run *store*: judging which runs never really ran, and moving them out of the dataset reversibly. Deletes nothing. |
 | `budget.py` | Spend measurement and ceiling evaluation (pure). |
 | `acceptance.py` | Running the project's own check, and rendering its result as evidence. |
 | `decompose.py` | Parsing, validating, and ordering a task graph (pure). |

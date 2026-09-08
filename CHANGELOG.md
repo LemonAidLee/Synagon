@@ -2,6 +2,44 @@
 
 ## Unreleased
 
+### Fixed — the run store held 141 runs that never happened
+
+For most of this project's life the test suite wrote real run records into the developer's own
+`.orchestrator/runs`. `tests/support.py` stopped that; it could not un-write what was already
+there. **141 synthetic runs against 23 real ones — 86% of the dataset.** Everything downstream
+read them and reported them faithfully: the board drew 126 `Ready to Merge` cards for pipeline
+runs that never ran, `--stats` scored one agent over 324 executions that were mocks, and the
+planner's memory and the design surface's evidence were computed from the same numbers. None of
+it was a bug. Each was a correct projection of a corrupt store, which is the harder shape of
+the problem — nothing anywhere reported an error.
+
+- **`orchestrator/archive.py` and `--archive-runs`.** A run is *moved*, whole, into
+  `.orchestrator/archive/runs/<run_id>/`, and `--restore-runs` moves it back byte-for-byte.
+  The only filesystem verb in the module, in both directions, is a move: a run record is
+  evidence, and evidence is corrected by being set aside with a reason attached, not destroyed.
+  `--archived` lists what is held and why.
+- **What counts as synthetic is evidence, not a guess.** Matching the task text would have
+  worked exactly once, for the string those particular tests happened to use. A run is judged
+  on two facts a real invocation cannot both produce: no execution reported any token usage,
+  *and* every execution finished faster than a process launch plausibly could. Both must hold,
+  and a run that recorded no executions at all is never synthetic — that is an interrupted run,
+  which is real. On this store the populations do not come close to touching: the slowest
+  synthetic execution took 0.88s, the fastest real one 8.26s.
+- **It asks first**, shows the plan, supports `--dry-run`, writes an `archived.json` beside
+  each archived run recording the timestamp, the reason and the evidence, and refuses to
+  overwrite a live run on restore.
+- **`tests/test_archive.py`** — 28 tests, including that a restored run is byte-for-byte what
+  it was, that a conflicting id is reported rather than clobbered, and that a run with no
+  executions is kept.
+
+**What the clean store then said.** `--stats` now puts the researcher role's Antigravity
+pairing at a **90% error rate over 10 runs** — the failure diagnosed by hand below, sitting in
+the data the whole time and drowned out by 141 runs that never called a provider. It also
+corrects a claim made from the polluted store: the Claude researcher has **3** recorded runs
+here, not 20, which is under the five-observation line `--stats` flags. The reassignment was
+right; the evidence quoted for it was inflated, and that is exactly the class of error a
+corrupt dataset produces.
+
 ### Fixed — the pipeline now survives a flaky agent
 
 This is the change that matters most in this release, and it came from reading the project's
@@ -50,9 +88,13 @@ Asked to *investigate a project* — precisely the researcher's job — the Anti
 It answers small prompts correctly, so `--doctor` passes and nothing looks wrong until a run
 dies. Six consecutive live attempts produced six empty replies.
 
-`agents:` now assigns the researcher to `claude / sonnet`, which `--stats` shows filling that
-role 20 times in this repository with a 0% error rate. The reasoning is recorded in
-`orchestrator.yaml` beside the entry, including what to restore to put Antigravity back.
+`agents:` now assigns the researcher to `claude / sonnet`. The reasoning is recorded in
+`orchestrator.yaml` beside the entry, including what to restore to put Antigravity back —
+now as the first rung of a ladder rather than as the only choice, so a repeat of this failure
+escalates instead of ending the run.
+
+> The pass-rate figures originally quoted here came from the polluted run store; see
+> *the run store held 141 runs that never happened*, above, for what the cleaned dataset says.
 
 **The result:** the same two-task parallel goal that delivered **0/2** before these changes now
 delivers **2/2**, with both agents' work committed to their own branches and their own new test

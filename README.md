@@ -80,6 +80,8 @@ git merge orchestrator/run/<run_id>      # merging is always your decision
 | `--resume <id>` | Continue a run that stopped. Completed phases are replayed from its event log, not paid for again. |
 | `--stats [N] [--json]` | Analyze every recorded run: pass rates by agent/model/role, what a pass costs against a failure, whether repairs and ensembles earn their price. |
 | `--prune-runs [--older-than 30d] [--merged-older-than 1d] [--keep-failed] [--dry-run]` | Delete old run branches and leftover worktrees. A branch whose pull request merged answers to the shorter threshold — its work is already in the base branch. Always shows the plan and asks first. |
+| `--archive-runs [--matching TEXT] [--dry-run]` | Move runs in which no agent was really invoked out of the run store, so `--stats`, the board and the planner's memory stop counting them. Nothing is deleted. |
+| `--archived` / `--restore-runs [id…]` | List what is archived and why, or move it back into the store. |
 | `--memory [N] [--json]` | What this repository has taught the planner: which files sibling tasks fought over, where work lands, what a task cost, what you rejected and why. Add `--plan-only` to print the exact block the decomposer's prompt will carry. |
 | `"<goal>" --plan-only [--json]` | Break a goal into a task graph — dependencies, acceptance criteria, and the order the tasks could run in — and stop. Implements nothing. |
 | `"<goal>" --delegate [--parallel N]` | Decompose the goal, then run each task as its own session on its own branch, in dependency order. |
@@ -262,6 +264,18 @@ deliberate — the branch *is* the run's output. Sweep old ones when you no long
 python -m orchestrator --prune-runs --older-than 30d --keep-failed --dry-run
 ```
 
+The run store is the dataset `--stats`, the board and the planner's memory all read, so a run
+recorded in it that never actually happened is not clutter — it is a wrong answer everywhere
+downstream, reported confidently. `--archive-runs` moves those out (a run counts as one when
+**no** execution reported token usage *and* none took real time, which no live agent
+invocation can both do), into `.orchestrator/archive/runs/` with a note saying why:
+
+```powershell
+python -m orchestrator --archive-runs --dry-run   # the plan, and nothing else
+python -m orchestrator --archived                 # what is archived, and why
+python -m orchestrator --restore-runs             # all of it back
+```
+
 `.orchestrator/` is git-ignored. Nothing in it is required for the orchestrator to run.
 
 ---
@@ -326,6 +340,7 @@ orchestrator/
   preflight.py    probes every agent before any of them launches
   workspace.py    git worktree isolation, commit, and retention
   prune.py        the retention sweep behind --prune-runs
+  archive.py      the run store's own retention: moving a run out of the dataset, reversibly
   budget.py       token and time ceilings
   acceptance.py   the objective gate: the project's own check, run by the orchestrator
   decompose.py    turning a goal into a validated task graph
