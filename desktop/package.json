@@ -1,0 +1,25 @@
+{
+  "name": "orchestrator-desktop",
+  "productName": "Orchestrator",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The desktop shell around the orchestrator daemon: open a project, drive its team.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --dir",
+    "package": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0"
+  },
+  "build": {
+    "appId": "dev.orchestrator.desktop",
+    "files": ["main.js", "preload.js", "package.json"],
+    "extraResources": [],
+    "win": { "target": "nsis" },
+    "mac": { "target": "dmg" },
+    "linux": { "target": "AppImage" }
+  }
+}

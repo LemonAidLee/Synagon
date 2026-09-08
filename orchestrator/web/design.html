@@ -1,0 +1,772 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="orchestrator-token" content="__ORCHESTRATOR_TOKEN__">
+<title>Design the team — AI Orchestrator</title>
+<style>
+  :root {
+    --bg: #10131a;
+    --panel: #171b24;
+    --panel-2: #1e2430;
+    --line: #2a3243;
+    --ink: #e6e9f0;
+    --dim: #8b93a7;
+    --accent: #6ea8fe;
+    --ok: #4ade80;
+    --warn: #fbbf24;
+    --bad: #f87171;
+    --person: #c084fc;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%;
+    background: var(--bg); color: var(--ink);
+    font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  #app { display: grid; grid-template-rows: auto 1fr; height: 100%; }
+
+  header {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    padding: 12px 20px; border-bottom: 1px solid var(--line); background: var(--panel);
+  }
+  header h1 { font-size: 15px; margin: 0; font-weight: 650; letter-spacing: .2px; }
+  header .spacer { flex: 1; }
+  .pill {
+    font-size: 12px; padding: 3px 10px; border-radius: 999px;
+    border: 1px solid var(--line); background: var(--panel-2); color: var(--dim);
+  }
+  .pill.ok { color: var(--ok); border-color: #24603c; }
+  .pill.bad { color: var(--bad); border-color: #6b2222; }
+  .pill.dirty { color: var(--warn); border-color: #6b4d12; }
+
+  button, select, input {
+    font: inherit; color: var(--ink);
+    background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: 7px; padding: 5px 10px;
+  }
+  button { cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  button.primary { background: #1d3557; border-color: #2f5c96; color: #dbe9ff; }
+  button.primary:hover:not(:disabled) { background: #234168; }
+  button.tiny { padding: 1px 7px; font-size: 12px; border-radius: 6px; }
+  button.danger:hover:not(:disabled) { border-color: var(--bad); color: var(--bad); }
+
+  main { display: grid; grid-template-columns: 1fr 360px; min-height: 0; }
+  #stage { overflow: auto; padding: 24px; min-width: 0; }
+
+  .pipeline { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; }
+  .arrow {
+    align-self: center; color: var(--dim); padding: 0 10px; font-size: 20px; user-select: none;
+  }
+  .phase {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    padding: 12px; min-width: 232px; margin-bottom: 18px;
+  }
+  .phase.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+  .phase-head { display: flex; align-items: center; gap: 6px; margin-bottom: 10px; }
+  .phase-role {
+    font-size: 12px; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--dim); font-weight: 600; flex: 1;
+  }
+  .phase-head .parallel { color: var(--person); font-size: 11px; }
+
+  .agent {
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px;
+    padding: 9px 10px; margin-bottom: 8px; cursor: pointer;
+  }
+  .agent.selected { border-color: var(--accent); }
+  .agent .name { font-weight: 600; }
+  .agent .model { color: var(--dim); font-size: 12px; word-break: break-all; }
+  .agent .ladder { color: var(--person); font-size: 11px; }
+
+  .addphase {
+    align-self: center; margin-bottom: 18px;
+  }
+
+  aside {
+    border-left: 1px solid var(--line); background: var(--panel);
+    overflow: auto; min-height: 0;
+  }
+  .section { padding: 14px 16px; border-bottom: 1px solid var(--line); }
+  .section h2 {
+    margin: 0 0 10px; font-size: 11px; letter-spacing: .12em;
+    text-transform: uppercase; color: var(--dim); font-weight: 600;
+  }
+  .field { display: grid; gap: 4px; margin-bottom: 10px; }
+  .field label { font-size: 12px; color: var(--dim); }
+  .field select, .field input { width: 100%; }
+  .row { display: flex; gap: 6px; align-items: center; }
+  .row select { flex: 1; min-width: 0; }
+  .hint { color: var(--dim); font-size: 12px; margin: 6px 0 0; }
+  .evidence { font-size: 11px; margin: 2px 0 0; line-height: 1.4; }
+  .evidence.good { color: var(--ok, #2e7d32); }
+  .evidence.poor { color: var(--bad, #b3261e); }
+  .evidence.thin { color: var(--dim); }
+  .agent .evidence { margin-top: 3px; }
+  .problem { color: var(--warn); font-size: 13px; margin: 0 0 6px; }
+  .problem::before { content: "! "; color: var(--bad); }
+  pre {
+    margin: 0; padding: 10px; background: #0c0f15; border: 1px solid var(--line);
+    border-radius: 8px; overflow: auto; max-height: 260px;
+    font: 12px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; color: #c8d3e6;
+  }
+  .empty { color: var(--dim); padding: 40px; text-align: center; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>Design the team</h1>
+    <span class="pill" id="file">orchestrator.yaml</span>
+    <span class="spacer"></span>
+    <select id="template" title="Start from a template"></select>
+    <button id="revert">Revert</button>
+    <button id="save" class="primary">Save to orchestrator.yaml</button>
+    <span class="pill" id="state">loading</span>
+  </header>
+  <main>
+    <div id="stage"><div class="empty">Loading the team…</div></div>
+    <aside>
+      <div class="section" id="inspector">
+        <h2>Selection</h2>
+        <p class="hint">Click an agent to edit it.</p>
+      </div>
+      <div class="section">
+        <h2>How the team decides</h2>
+        <div class="field">
+          <label for="consensus">Verifier consensus</label>
+          <select id="consensus"></select>
+        </div>
+        <div class="field">
+          <label for="repair">Repair attempts</label>
+          <input id="repair" type="number" min="0" max="10" step="1">
+        </div>
+        <p class="hint" id="consensus-hint"></p>
+      </div>
+      <div class="section" id="problems-section">
+        <h2>Before you save</h2>
+        <div id="problems"></div>
+      </div>
+      <div class="section">
+        <h2>What will be written</h2>
+        <pre id="preview"></pre>
+        <p class="hint">
+          Only these lines change. Every comment in the file is left alone, and the previous
+          version is kept as a <code>.bak-</code> copy.
+        </p>
+      </div>
+    </aside>
+  </main>
+</div>
+
+<script>
+"use strict";
+
+// The design surface is a view over orchestrator.yaml (Roadmap Phase 7). It holds no
+// authority of its own: the catalog it offers, the roles it knows, and the validation it
+// shows all come from the server, and the save is validated again there before it lands.
+
+const state = {
+  catalog: { models: {}, roles: {}, consensus_policies: [] },
+  templates: [],
+  writable: false,
+  team: null,       // { phases: [ {role, agents:[{agent, model:[...]}]} ], consensus, max_repair_attempts }
+  saved: null,      // the same, as last loaded or saved - what Revert goes back to
+  selected: null,   // { phase: i, agent: j }
+  problems: [],
+  busy: false,
+  evidence: null,   // what --stats has observed, keyed by agent, agent/model, and role
+};
+
+const el = (id) => document.getElementById(id);
+
+/* The design surface is served by `--design` and, since Roadmap Phase 8, by the daemon too.
+ * The daemon requires its launch token on every route; `--design` mints none and the page
+ * finds the placeholder untouched, so the same file works against both. */
+const tokenMeta = document.querySelector('meta[name="orchestrator-token"]');
+const rawToken = tokenMeta ? tokenMeta.getAttribute("content") : "";
+const TOKEN = (rawToken && rawToken.indexOf("__") !== 0) ? rawToken : "";
+
+function authHeaders(extra) {
+  const headers = Object.assign({}, extra || {});
+  if (TOKEN) headers["X-Orchestrator-Token"] = TOKEN;
+  return headers;
+}
+
+// --- the model -------------------------------------------------------------
+// A phase is consecutive same-role agents, which is exactly what graph.py means by one. The
+// editor stores phases directly and flattens them on save, so the drawing and the file cannot
+// disagree about what a phase is.
+
+function toPhases(agents) {
+  const phases = [];
+  for (const entry of agents || []) {
+    const ladder = Array.isArray(entry.model) ? entry.model.slice()
+                 : (entry.model ? [entry.model] : []);
+    const agent = { agent: entry.agent, model: ladder };
+    const last = phases[phases.length - 1];
+    if (last && last.role === entry.role) last.agents.push(agent);
+    else phases.push({ role: entry.role, agents: [agent] });
+  }
+  return phases;
+}
+
+function toAgents(team) {
+  const agents = [];
+  for (const phase of team.phases) {
+    for (const agent of phase.agents) {
+      const ladder = (agent.model || []).filter(Boolean);
+      agents.push({
+        agent: agent.agent,
+        model: ladder.length > 1 ? ladder : (ladder[0] || null),
+        role: phase.role,
+      });
+    }
+  }
+  return agents;
+}
+
+function clone(value) { return JSON.parse(JSON.stringify(value)); }
+
+function isDirty() {
+  return JSON.stringify(state.team) !== JSON.stringify(state.saved);
+}
+
+// --- validation ------------------------------------------------------------
+// The same questions the server asks, asked early enough to grey the button out. The server
+// is still the authority: this is a courtesy, not a gate.
+
+function validate(team) {
+  const problems = [];
+  const agents = toAgents(team);
+  const roles = agents.map((a) => a.role);
+
+  if (!agents.length) problems.push("A team needs at least one agent.");
+  if (agents.length && !roles.includes("implementer"))
+    problems.push("No agent has the 'implementer' role, so nothing would be written.");
+  if (agents.length && !roles.includes("verifier"))
+    problems.push("No agent has the 'verifier' role. Without one, the implementer's claim "
+                + "of success is the only evidence there is.");
+
+  team.phases.forEach((phase) => {
+    if (phase.role === "implementer" && phase.agents.length > 1)
+      problems.push("Two implementers in one phase would write the same working directory "
+                  + "at the same time. Give one implementer a model ladder instead.");
+    phase.agents.forEach((agent, index) => {
+      const known = state.catalog.models[agent.agent];
+      if (!known) {
+        problems.push(`${phase.role} ${index + 1}: '${agent.agent}' is not in the catalog.`);
+        return;
+      }
+      const ids = known.map((m) => m.id);
+      (agent.model || []).forEach((model) => {
+        if (model && !ids.includes(model))
+          problems.push(`${phase.role} ${index + 1}: '${agent.agent}' has no model '${model}'.`);
+      });
+    });
+  });
+  return problems;
+}
+
+// --- rendering -------------------------------------------------------------
+
+function render() {
+  state.problems = state.team ? validate(state.team) : [];
+  renderPipeline();
+  renderInspector();
+  renderSettings();
+  renderProblems();
+  renderPreview();
+  renderStatus();
+}
+
+function renderStatus() {
+  const pill = el("state");
+  if (state.busy) { pill.textContent = "saving…"; pill.className = "pill"; return; }
+  if (!state.writable) {
+    pill.textContent = "read-only";
+    pill.className = "pill bad";
+  } else if (state.problems.length) {
+    pill.textContent = `${state.problems.length} to fix`;
+    pill.className = "pill bad";
+  } else if (isDirty()) {
+    pill.textContent = "unsaved changes";
+    pill.className = "pill dirty";
+  } else {
+    pill.textContent = "saved";
+    pill.className = "pill ok";
+  }
+  el("save").disabled = !state.writable || !!state.problems.length || state.busy || !isDirty();
+  el("revert").disabled = !isDirty() || state.busy;
+}
+
+function renderPipeline() {
+  const stage = el("stage");
+  stage.innerHTML = "";
+  if (!state.team) { stage.innerHTML = '<div class="empty">Loading the team…</div>'; return; }
+
+  const pipeline = document.createElement("div");
+  pipeline.className = "pipeline";
+
+  state.team.phases.forEach((phase, phaseIndex) => {
+    if (phaseIndex > 0) {
+      const arrow = document.createElement("div");
+      arrow.className = "arrow";
+      arrow.textContent = "→";
+      pipeline.appendChild(arrow);
+    }
+    pipeline.appendChild(phaseNode(phase, phaseIndex));
+  });
+
+  if (state.team.phases.length) {
+    const arrow = document.createElement("div");
+    arrow.className = "arrow";
+    arrow.textContent = "→";
+    pipeline.appendChild(arrow);
+  }
+
+  const add = document.createElement("div");
+  add.className = "addphase";
+  const button = document.createElement("button");
+  button.textContent = "+ phase";
+  button.title = "Add a phase to the end of the pipeline";
+  button.onclick = () => {
+    state.team.phases.push({ role: defaultRole(), agents: [newAgent()] });
+    select(state.team.phases.length - 1, 0);
+  };
+  add.appendChild(button);
+  pipeline.appendChild(add);
+
+  stage.appendChild(pipeline);
+}
+
+function phaseNode(phase, phaseIndex) {
+  const node = document.createElement("div");
+  node.className = "phase" + (state.selected && state.selected.phase === phaseIndex ? " selected" : "");
+
+  const head = document.createElement("div");
+  head.className = "phase-head";
+
+  const role = document.createElement("div");
+  role.className = "phase-role";
+  role.textContent = phase.role || "(no role)";
+  head.appendChild(role);
+
+  if (phase.agents.length > 1) {
+    const parallel = document.createElement("span");
+    parallel.className = "parallel";
+    parallel.textContent = `‖ ${phase.agents.length} in parallel`;
+    head.appendChild(parallel);
+  }
+
+  head.appendChild(tinyButton("◀", "Move earlier", phaseIndex === 0, () => movePhase(phaseIndex, -1)));
+  head.appendChild(tinyButton("▶", "Move later",
+    phaseIndex === state.team.phases.length - 1, () => movePhase(phaseIndex, 1)));
+  head.appendChild(tinyButton("✕", "Remove this phase", false, () => {
+    state.team.phases.splice(phaseIndex, 1);
+    state.selected = null;
+    render();
+  }, true));
+  node.appendChild(head);
+
+  phase.agents.forEach((agent, agentIndex) => {
+    node.appendChild(agentChip(agent, phaseIndex, agentIndex));
+  });
+
+  const add = document.createElement("button");
+  add.className = "tiny";
+  add.textContent = "+ agent";
+  add.title = "Run another agent in this phase, in parallel";
+  add.onclick = (event) => {
+    event.stopPropagation();
+    phase.agents.push(newAgent());
+    select(phaseIndex, phase.agents.length - 1);
+  };
+  node.appendChild(add);
+
+  node.onclick = () => select(phaseIndex, 0);
+  return node;
+}
+
+function agentChip(agent, phaseIndex, agentIndex) {
+  const chip = document.createElement("div");
+  const isSelected = state.selected
+    && state.selected.phase === phaseIndex && state.selected.agent === agentIndex;
+  chip.className = "agent" + (isSelected ? " selected" : "");
+
+  const name = document.createElement("div");
+  name.className = "name";
+  name.textContent = agent.agent;
+  chip.appendChild(name);
+
+  const model = document.createElement("div");
+  model.className = "model";
+  model.textContent = (agent.model || [])[0] || "(provider default)";
+  chip.appendChild(model);
+
+  if ((agent.model || []).length > 1) {
+    const ladder = document.createElement("div");
+    ladder.className = "ladder";
+    ladder.textContent = `escalates to ${agent.model[1]}`;
+    chip.appendChild(ladder);
+  }
+
+  chip.appendChild(evidenceNote("by_model", `${agent.agent}/${(agent.model || [])[0] || "-"}`));
+
+  chip.onclick = (event) => { event.stopPropagation(); select(phaseIndex, agentIndex); };
+  return chip;
+}
+
+function tinyButton(label, title, disabled, onClick, danger) {
+  const button = document.createElement("button");
+  button.className = "tiny" + (danger ? " danger" : "");
+  button.textContent = label;
+  button.title = title;
+  button.disabled = !!disabled;
+  button.onclick = (event) => { event.stopPropagation(); onClick(); };
+  return button;
+}
+
+function renderInspector() {
+  const panel = el("inspector");
+  panel.innerHTML = "<h2>Selection</h2>";
+  if (!state.team || !state.selected) {
+    panel.insertAdjacentHTML("beforeend", '<p class="hint">Click an agent to edit it.</p>');
+    return;
+  }
+
+  const phase = state.team.phases[state.selected.phase];
+  if (!phase) { state.selected = null; return; }
+  const agent = phase.agents[state.selected.agent];
+
+  panel.appendChild(field("Role of this phase", selectInput(
+    Object.keys(state.catalog.roles), phase.role, (value) => { phase.role = value; render(); }
+  )));
+
+  const responsibility = state.catalog.roles[phase.role];
+  if (responsibility) {
+    const hint = document.createElement("p");
+    hint.className = "hint";
+    hint.textContent = responsibility;
+    panel.appendChild(hint);
+  }
+  panel.appendChild(evidenceNote("by_role", phase.role));
+
+  if (!agent) return;
+
+  panel.appendChild(field("Provider", selectInput(
+    Object.keys(state.catalog.models), agent.agent, (value) => {
+      agent.agent = value;
+      agent.model = [firstModel(value)];
+      render();
+    }
+  )));
+  panel.appendChild(evidenceNote("by_agent", agent.agent));
+
+  const models = (state.catalog.models[agent.agent] || []).map((m) => m.id);
+  (agent.model.length ? agent.model : [""]).forEach((chosen, step) => {
+    const row = document.createElement("div");
+    row.className = "row";
+    row.appendChild(selectInput(models, chosen, (value) => {
+      agent.model[step] = value;
+      render();
+    }));
+    if (agent.model.length > 1) {
+      row.appendChild(tinyButton("✕", "Remove this ladder step", false, () => {
+        agent.model.splice(step, 1);
+        render();
+      }, true));
+    }
+    panel.appendChild(field(step === 0 ? "Model" : `On repair ${step}`, row));
+    panel.appendChild(evidenceNote("by_model", `${agent.agent}/${chosen || "-"}`));
+  });
+
+  const ladder = document.createElement("button");
+  ladder.className = "tiny";
+  ladder.textContent = "+ escalation step";
+  ladder.title = "Use a stronger model once this one's work has been sent back";
+  ladder.onclick = () => { agent.model.push(firstModel(agent.agent)); render(); };
+  panel.appendChild(ladder);
+
+  const remove = document.createElement("button");
+  remove.className = "tiny danger";
+  remove.style.marginLeft = "6px";
+  remove.textContent = "remove agent";
+  remove.onclick = () => {
+    phase.agents.splice(state.selected.agent, 1);
+    if (!phase.agents.length) state.team.phases.splice(state.selected.phase, 1);
+    state.selected = null;
+    render();
+  };
+  panel.appendChild(remove);
+}
+
+// --- the evidence beside the choice (Roadmap 8.3) --------------------------
+// `--stats` has always known which pairings pass and what they cost. Until this, the only
+// place that knowledge lived was a report you had to go and read, while the dropdown that
+// acts on it sat here with nothing beside it. Nothing new is measured: this renders the
+// projection `/api/stats` serves, and says "no runs recorded yet" rather than inventing one.
+
+function evidenceRow(kind, key) {
+  if (!state.evidence) return null;
+  const map = state.evidence[kind];
+  return map ? map[key] || null : null;
+}
+
+function evidenceText(row) {
+  if (!row || !row.runs) return { text: "no runs recorded yet", tone: "thin" };
+  const runs = `${row.runs} run${row.runs === 1 ? "" : "s"}`;
+  const cost = row.tokens_per_run
+    ? ` · ${(row.tokens_per_run / 1000).toFixed(1)}k tokens each` : "";
+  // A null pass rate means nothing was ever verified, which is not the same as failing.
+  if (row.pass_rate === null || row.pass_rate === undefined) {
+    return { text: `no verdict over ${runs}${cost}`, tone: "thin" };
+  }
+  const thin = row.thin ? " — thin evidence" : "";
+  return {
+    text: `${row.pass_rate}% pass over ${runs}${cost}${thin}`,
+    tone: row.thin ? "thin" : (row.pass_rate >= 60 ? "good" : "poor"),
+  };
+}
+
+function evidenceNote(kind, key) {
+  const note = document.createElement("p");
+  const { text, tone } = evidenceText(evidenceRow(kind, key));
+  note.className = `evidence ${tone}`;
+  note.textContent = text;
+  return note;
+}
+
+async function loadEvidence() {
+  try {
+    const response = await fetch("/api/stats", { headers: authHeaders() });
+    if (!response.ok) return;
+    state.evidence = await response.json();
+    render();
+  } catch (error) {
+    state.evidence = null;   // a page that cannot reach it still composes a team
+  }
+}
+
+function field(label, control) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "field";
+  const caption = document.createElement("label");
+  caption.textContent = label;
+  wrapper.appendChild(caption);
+  wrapper.appendChild(control);
+  return wrapper;
+}
+
+function selectInput(options, value, onChange) {
+  const input = document.createElement("select");
+  for (const option of options) {
+    const item = document.createElement("option");
+    item.value = option;
+    item.textContent = option;
+    if (option === value) item.selected = true;
+    input.appendChild(item);
+  }
+  if (value && !options.includes(value)) {
+    const orphan = document.createElement("option");
+    orphan.value = value;
+    orphan.textContent = `${value} (not in the catalog)`;
+    orphan.selected = true;
+    input.appendChild(orphan);
+  }
+  input.onchange = () => onChange(input.value);
+  return input;
+}
+
+function renderSettings() {
+  const consensus = el("consensus");
+  if (!consensus.options.length) {
+    for (const policy of state.catalog.consensus_policies || []) {
+      const option = document.createElement("option");
+      option.value = policy;
+      option.textContent = policy;
+      consensus.appendChild(option);
+    }
+  }
+  if (state.team) {
+    consensus.value = state.team.consensus;
+    el("repair").value = state.team.max_repair_attempts;
+  }
+  const verifiers = state.team
+    ? toAgents(state.team).filter((a) => a.role === "verifier").length : 0;
+  el("consensus-hint").textContent = {
+    unanimous: `Every verifier must say PASS. With ${verifiers} verifier(s), one dissent fails the run.`,
+    majority: `More than half of the ${verifiers} verifier(s) must say PASS.`,
+    any: "One PASS is enough, whatever the others said.",
+  }[state.team ? state.team.consensus : "unanimous"] || "";
+}
+
+function renderProblems() {
+  const panel = el("problems");
+  panel.innerHTML = "";
+  if (!state.problems.length) {
+    panel.innerHTML = '<p class="hint">Nothing objects to this team.</p>';
+    return;
+  }
+  for (const problem of state.problems) {
+    const line = document.createElement("p");
+    line.className = "problem";
+    line.textContent = problem;
+    panel.appendChild(line);
+  }
+}
+
+function renderPreview() {
+  if (!state.team) return;
+  const lines = ["agents:"];
+  for (const entry of toAgents(state.team)) {
+    lines.push(`  - agent: ${entry.agent}`);
+    if (Array.isArray(entry.model)) {
+      lines.push("    model:");
+      entry.model.forEach((model, step) => {
+        const comment = step === 0 ? "  # first attempt"
+                      : (step === 1 ? "  # first repair, and beyond" : "");
+        lines.push(`      - ${model}${comment}`);
+      });
+    } else if (entry.model) {
+      lines.push(`    model: ${entry.model}`);
+    }
+    lines.push(`    role: ${entry.role}`);
+    lines.push("");
+  }
+  while (lines.length && lines[lines.length - 1] === "") lines.pop();
+  lines.push("");
+  lines.push(`max_repair_attempts: ${state.team.max_repair_attempts}`);
+  lines.push("");
+  lines.push("verification:");
+  lines.push(`  consensus: ${state.team.consensus}`);
+  el("preview").textContent = lines.join("\n");
+}
+
+// --- editing helpers -------------------------------------------------------
+
+function select(phase, agent) {
+  state.selected = { phase, agent };
+  render();
+}
+
+function movePhase(index, delta) {
+  const target = index + delta;
+  if (target < 0 || target >= state.team.phases.length) return;
+  const [phase] = state.team.phases.splice(index, 1);
+  state.team.phases.splice(target, 0, phase);
+  state.selected = { phase: target, agent: 0 };
+  render();
+}
+
+function defaultRole() {
+  const roles = Object.keys(state.catalog.roles);
+  return roles.includes("verifier") ? "verifier" : (roles[0] || "verifier");
+}
+
+function firstModel(provider) {
+  const models = state.catalog.models[provider] || [];
+  return models.length ? models[0].id : "";
+}
+
+function newAgent() {
+  const provider = Object.keys(state.catalog.models)[0] || "claude";
+  return { agent: provider, model: [firstModel(provider)] };
+}
+
+// --- the server ------------------------------------------------------------
+
+async function load() {
+  const response = await fetch("/api/team", { headers: authHeaders() });
+  const data = await response.json();
+  state.catalog = data.catalog || state.catalog;
+  state.templates = data.templates || [];
+  state.writable = !!data.writable;
+
+  state.team = {
+    phases: toPhases((data.team || {}).agents || []),
+    consensus: (data.team || {}).consensus || "unanimous",
+    max_repair_attempts: (data.team || {}).max_repair_attempts ?? 2,
+  };
+  state.saved = clone(state.team);
+
+  const picker = el("template");
+  picker.innerHTML = "";
+  const none = document.createElement("option");
+  none.value = "";
+  none.textContent = "Start from a template…";
+  picker.appendChild(none);
+  for (const template of state.templates) {
+    const option = document.createElement("option");
+    option.value = template.name;
+    option.textContent = `${template.label} — ${template.agents.length} agents`;
+    option.title = template.description;
+    picker.appendChild(option);
+  }
+  render();
+}
+
+async function save() {
+  state.busy = true;
+  renderStatus();
+  try {
+    const response = await fetch("/api/team", {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({
+        agents: toAgents(state.team),
+        consensus: state.team.consensus,
+        max_repair_attempts: state.team.max_repair_attempts,
+      }),
+    });
+    const result = await response.json();
+    if (result.ok) {
+      state.saved = clone(state.team);
+      state.problems = [];
+    } else {
+      state.problems = result.problems && result.problems.length
+        ? result.problems : [result.error || "the team was not saved"];
+    }
+  } catch (error) {
+    state.problems = [`could not reach the orchestrator: ${error}`];
+  } finally {
+    state.busy = false;
+    render();
+  }
+}
+
+el("save").onclick = save;
+el("revert").onclick = () => { state.team = clone(state.saved); state.selected = null; render(); };
+el("consensus").onchange = (event) => { state.team.consensus = event.target.value; render(); };
+el("repair").onchange = (event) => {
+  state.team.max_repair_attempts = Math.max(0, parseInt(event.target.value, 10) || 0);
+  render();
+};
+el("template").onchange = (event) => {
+  const template = state.templates.find((t) => t.name === event.target.value);
+  event.target.value = "";
+  if (!template) return;
+  state.team = {
+    phases: toPhases(template.agents),
+    consensus: template.consensus,
+    max_repair_attempts: template.max_repair_attempts,
+  };
+  state.selected = null;
+  render();
+};
+
+window.addEventListener("beforeunload", (event) => {
+  if (isDirty()) { event.preventDefault(); event.returnValue = ""; }
+});
+
+loadEvidence();
+
+load().catch((error) => {
+  el("stage").innerHTML = `<div class="empty">Could not load the team: ${error}</div>`;
+});
+</script>
+</body>
+</html>

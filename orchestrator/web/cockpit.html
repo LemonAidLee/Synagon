@@ -1,0 +1,2537 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="orchestrator-token" content="__ORCHESTRATOR_TOKEN__">
+    <title>ORCHESTRATOR</title>
+    <style>
+:root, body.theme-srcery {
+    --bg: #1C1B19;
+    --panel: #2D2C29;
+    --green: #519F50;
+    --amber: #FBB829;
+    --red: #EF2F27;
+    --cyan: #0AAEB3;
+    --dim: #918175;
+    --text: #FCE8C3;
+    --text-dim: #BAA67F;
+
+    --scrollbar-track: var(--panel);
+    --scrollbar-thumb: #3a3936;
+    --scrollbar-thumb-hover: #4a4946;
+    --scrollbar-thumb-active: var(--dim);
+
+    --hl-keyword: #E02C6D;
+    --hl-string: #519F50;
+    --hl-comment: #918175;
+    --hl-number: #68A8E4;
+    --hl-type: #0AAEB3;
+    --hl-builtin: #2C78BF;
+    --hl-function: #FBB829;
+
+    /* ANSI Colors (Srcery) */
+    --ansi-30: #1C1B19; --ansi-31: #EF2F27; --ansi-32: #519F50; --ansi-33: #FBB829;
+    --ansi-34: #2C78BF; --ansi-35: #E02C6D; --ansi-36: #0AAEB3; --ansi-37: #BAA67F;
+    --ansi-90: #918175; --ansi-91: #F75341; --ansi-92: #98BC37; --ansi-93: #FED06E;
+    --ansi-94: #68A8E4; --ansi-95: #FF5C8F; --ansi-96: #2BE4D0; --ansi-97: #FCE8C3;
+}
+
+body.theme-moonfly {
+    --bg: #080808;
+    --panel: #141414;
+    --green: #8cc85f;
+    --amber: #e3c78a;
+    --red: #ff5454;
+    --cyan: #79dac8;
+    --dim: #323437;
+    --text: #d0d0d0;
+    --text-dim: #888888;
+
+    --scrollbar-track: var(--panel);
+    --scrollbar-thumb: #323437;
+    --scrollbar-thumb-hover: #505050;
+    --scrollbar-thumb-active: var(--dim);
+
+    --hl-keyword: #cf87e8;
+    --hl-string: #8cc85f;
+    --hl-comment: #505050;
+    --hl-number: #ff5454;
+    --hl-type: #79dac8;
+    --hl-builtin: #80a0ff;
+    --hl-function: #e3c78a;
+
+    /* ANSI Colors (Moonfly) */
+    --ansi-30: #323437; --ansi-31: #ff5454; --ansi-32: #8cc85f; --ansi-33: #e3c78a;
+    --ansi-34: #80a0ff; --ansi-35: #cf87e8; --ansi-36: #79dac8; --ansi-37: #d0d0d0;
+    --ansi-90: #505050; --ansi-91: #ff5454; --ansi-92: #8cc85f; --ansi-93: #e3c78a;
+    --ansi-94: #80a0ff; --ansi-95: #cf87e8; --ansi-96: #79dac8; --ansi-97: #ffffff;
+}
+
+body.theme-jellybeans {
+    --bg: #151515;
+    --panel: #1c1c1c;
+    --green: #99ad6a;
+    --amber: #d8ad4c;
+    --red: #cf6a4c;
+    --cyan: #71b9f8;
+    --dim: #404040;
+    --text: #e8e8d3;
+    --text-dim: #888888;
+
+    --scrollbar-track: var(--panel);
+    --scrollbar-thumb: #3b3b3b;
+    --scrollbar-thumb-hover: #555555;
+    --scrollbar-thumb-active: var(--dim);
+
+    --hl-keyword: #8fbfdc;
+    --hl-string: #99ad6a;
+    --hl-comment: #888888;
+    --hl-number: #cf6a4c;
+    --hl-type: #71b9f8;
+    --hl-builtin: #cf6a4c;
+    --hl-function: #d8ad4c;
+
+    /* ANSI Colors (Jellybeans) */
+    --ansi-30: #3b3b3b; --ansi-31: #cf6a4c; --ansi-32: #99ad6a; --ansi-33: #d8ad4c;
+    --ansi-34: #597bc5; --ansi-35: #a037b0; --ansi-36: #71b9f8; --ansi-37: #adadad;
+    --ansi-90: #404040; --ansi-91: #cf6a4c; --ansi-92: #99ad6a; --ansi-93: #d8ad4c;
+    --ansi-94: #597bc5; --ansi-95: #a037b0; --ansi-96: #71b9f8; --ansi-97: #e8e8d3;
+}
+
+body.theme-tender {
+    --bg: #282828;
+    --panel: #202020;
+    --green: #c9d05c;
+    --amber: #ffc24b;
+    --red: #f43753;
+    --cyan: #73cef4;
+    --dim: #4c4c4c;
+    --text: #eeeeee;
+    --text-dim: #b3b3b3;
+
+    --scrollbar-track: var(--panel);
+    --scrollbar-thumb: #3a3a3a;
+    --scrollbar-thumb-hover: #4d4d4d;
+    --scrollbar-thumb-active: var(--dim);
+
+    --hl-keyword: #d3b987;
+    --hl-string: #c9d05c;
+    --hl-comment: #4c4c4c;
+    --hl-number: #ffc24b;
+    --hl-type: #b3deef;
+    --hl-builtin: #73cef4;
+    --hl-function: #d3b987;
+
+    /* ANSI Colors (Tender) */
+    --ansi-30: #282828; --ansi-31: #f43753; --ansi-32: #c9d05c; --ansi-33: #ffc24b;
+    --ansi-34: #b3deef; --ansi-35: #d3b987; --ansi-36: #73cef4; --ansi-37: #eeeeee;
+    --ansi-90: #4c4c4c; --ansi-91: #f43753; --ansi-92: #c9d05c; --ansi-93: #ffc24b;
+    --ansi-94: #b3deef; --ansi-95: #d3b987; --ansi-96: #73cef4; --ansi-97: #ffffff;
+}
+
+body.theme-miasma {
+    --bg: #222222;
+    --panel: #1a1a1a;
+    --green: #5f875f;
+    --amber: #b36d43;
+    --red: #bb7744;
+    --cyan: #c9a554;
+    --dim: #666666;
+    --text: #c2c2b0;
+    --text-dim: #78824b;
+
+    --scrollbar-track: var(--panel);
+    --scrollbar-thumb: #333333;
+    --scrollbar-thumb-hover: #4a4a4a;
+    --scrollbar-thumb-active: var(--text-dim);
+
+    --hl-keyword: #78824b;
+    --hl-string: #c9a554;
+    --hl-comment: #666666;
+    --hl-number: #d7c483;
+    --hl-type: #5f875f;
+    --hl-builtin: #b36d43;
+    --hl-function: #c9a554;
+
+    /* ANSI Colors (Miasma) */
+    --ansi-30: #222222; --ansi-31: #685742; --ansi-32: #5f875f; --ansi-33: #b36d43;
+    --ansi-34: #78824b; --ansi-35: #bb7744; --ansi-36: #c9a554; --ansi-37: #d7c483;
+    --ansi-90: #666666; --ansi-91: #685742; --ansi-92: #5f875f; --ansi-93: #b36d43;
+    --ansi-94: #78824b; --ansi-95: #bb7744; --ansi-96: #c9a554; --ansi-97: #d7c483;
+}
+
+    --font: ui-monospace, "Cascadia Code", "JetBrains Mono", "SF Mono", Consolas, "DejaVu Sans Mono", monospace;
+    
+    --sidebar-width: 250px;
+    --inspector-width: 300px;
+    --terminals-height: 250px;
+}
+
+*, *::before, *::after {
+    box-sizing: border-box;
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+
+/* CUSTOM SCROLLBARS (WEBKIT) */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+::-webkit-scrollbar-track {
+    background: var(--scrollbar-track);
+}
+::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+}
+::-webkit-scrollbar-thumb:hover {
+    background: var(--scrollbar-thumb-hover);
+}
+::-webkit-scrollbar-thumb:active {
+    background: var(--scrollbar-thumb-active);
+}
+::-webkit-scrollbar-corner {
+    background: var(--scrollbar-track);
+}
+
+body {
+    margin: 0;
+    padding: 0;
+    background-color: var(--bg);
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 16px;
+    line-height: 1.3;
+    height: 100vh;
+    overflow: hidden;
+    font-variant-numeric: tabular-nums;
+}
+
+/* SCANLINES */
+.scanlines {
+    position: fixed;
+    top: 0; left: 0; width: 100vw; height: 100vh;
+    background: repeating-linear-gradient(
+        to bottom,
+        transparent 0,
+        transparent 1px,
+        rgba(0, 0, 0, 0.15) 2px
+    );
+    pointer-events: none;
+    z-index: 9999;
+}
+@media (prefers-reduced-motion: reduce) {
+    .scanlines { display: none; }
+}
+
+/* TYPOGRAPHY & GLOW */
+h1, h2, h3, .panel-header, .tab {
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-weight: normal;
+    margin: 0;
+}
+.micro-label {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--text-dim);
+}
+
+.glow-green { text-shadow: 0 0 4px var(--green); color: var(--green); }
+.glow-amber { text-shadow: 0 0 4px var(--amber); color: var(--amber); }
+.glow-red { text-shadow: 0 0 4px var(--red); color: var(--red); }
+.glow-cyan { text-shadow: 0 0 4px var(--cyan); color: var(--cyan); }
+
+/* LAYOUT */
+.app-container {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    min-width: 1000px;
+}
+.app-header {
+    flex: 0 0 40px;
+    border-bottom: 1px solid var(--dim);
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    background-color: var(--panel);
+}
+.header-logo {
+    font-size: 21px;
+    color: var(--green);
+    margin-right: 32px;
+    letter-spacing: 0.15em;
+    font-weight: bold;
+}
+.goal-input-container {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    border: 1px solid var(--green);
+    padding: 4px 8px;
+    margin-right: 16px;
+    background: var(--bg);
+}
+.prompt-char { color: var(--green); margin-right: 8px; }
+#goal-input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: var(--green);
+    font-family: var(--font);
+    font-size: 16px;
+    outline: none;
+}
+#goal-input::placeholder { color: var(--text-dim); }
+.blinking-cursor {
+    color: var(--green);
+    animation: blink 1s step-end infinite;
+}
+@keyframes blink { 50% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .blinking-cursor { animation: none; } }
+
+.goal-controls select, .goal-controls button {
+    background: var(--bg);
+    border: 1px solid var(--dim);
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 15px;
+    padding: 4px 8px;
+    cursor: pointer;
+    border-radius: 0;
+    text-transform: uppercase;
+}
+.goal-controls button.primary-btn {
+    border-color: var(--green);
+    color: var(--green);
+}
+.goal-controls button.primary-btn:hover {
+    background: var(--green);
+    color: var(--bg);
+}
+
+.app-middle {
+    flex: 1;
+    display: flex;
+    min-height: 0;
+}
+aside {
+    display: flex;
+    flex-direction: column;
+    background: var(--bg);
+}
+#sidebar { width: var(--sidebar-width); flex-shrink: 0; }
+#inspector { width: var(--inspector-width); flex-shrink: 0; }
+.editor-area { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
+.splitter {
+    width: 4px;
+    background: var(--dim);
+    cursor: col-resize;
+    flex-shrink: 0;
+}
+.splitter:hover, .splitter:active { background: var(--cyan); }
+.splitter-horizontal {
+    height: 4px;
+    background: var(--dim);
+    cursor: row-resize;
+    flex-shrink: 0;
+}
+.splitter-horizontal:hover, .splitter-horizontal:active { background: var(--cyan); }
+
+/* PANELS */
+.panel-header {
+    background: var(--panel);
+    border-bottom: 1px solid var(--dim);
+    padding: 8px;
+    font-size: 13px;
+    color: var(--cyan);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.panel-actions button, .icon-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-family: var(--font);
+    padding: 0 4px;
+}
+.panel-actions button:hover { color: var(--text); }
+
+/* TABS */
+.tabs-header {
+    display: flex;
+    border-bottom: 1px solid var(--dim);
+    background: var(--panel);
+    overflow-x: auto;
+}
+.tabs-header::-webkit-scrollbar { height: 2px; }
+.tabs-header::-webkit-scrollbar-thumb { background: var(--dim); }
+
+.tab {
+    background: transparent;
+    border: none;
+    border-right: 1px solid var(--dim);
+    padding: 8px 16px;
+    color: var(--text-dim);
+    font-family: var(--font);
+    font-size: 15px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+.tab.active {
+    color: var(--text);
+    background: var(--bg);
+    border-bottom: 1px solid var(--bg);
+    margin-bottom: -1px;
+}
+.tab-close { margin-left: 8px; color: var(--red); opacity: 0.5; }
+.tab-close:hover { opacity: 1; }
+
+.tab-content { display: none; flex: 1; overflow: auto; position: relative; }
+.tab-content.active { display: flex; flex-direction: column; }
+
+/* PIPELINE */
+/* BOOT OVERLAY */
+.boot-overlay {
+    position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+    background: var(--bg); color: var(--green); z-index: 10000;
+    display: none; align-items: center; justify-content: center;
+    font-size: 19px; white-space: pre; font-weight: bold;
+}
+.booting .boot-overlay { display: flex; }
+.booting .app-container { display: none; }
+
+/* CHOREOGRAPHY HEADER */
+.pipeline-choreography {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 16px;
+    padding: 16px 16px 0 16px;
+    font-size: 16px;
+    font-weight: bold;
+}
+.choreo-col {
+    display: flex; flex-direction: column; align-items: center; gap: 6px;
+    flex: 1;
+}
+.choreo-arrow {
+    color: var(--dim);
+    font-weight: bold;
+    width: 30px;
+    text-align: center;
+}
+.choreo-arrow.active { color: var(--green); }
+.state-icon.idle { color: var(--dim); }
+.state-icon.queued { color: var(--amber); }
+.state-icon.running { color: var(--green); animation: blink 1s infinite; }
+.state-icon.complete { color: var(--text); }
+.state-icon.failed { color: var(--red); }
+
+@keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+
+.pipeline-board {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 16px;
+    padding: 0 16px 16px 16px;
+    overflow-x: hidden;
+    height: 100%;
+}
+.pipeline-col {
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--dim);
+    min-width: 0;
+}
+.col-header {
+    padding: 8px;
+    border-bottom: 1px solid var(--dim);
+    background: var(--panel);
+    display: flex;
+    justify-content: space-between;
+    color: var(--cyan);
+    font-size: 13px;
+    text-transform: uppercase;
+}
+.col-body {
+    flex: 1;
+    padding: 8px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.col-footer {
+    padding: 8px;
+    border-top: 1px dashed var(--dim);
+    text-align: center;
+}
+.add-agent-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-dim);
+    font-family: var(--font);
+    cursor: pointer;
+    font-size: 13px;
+}
+.add-agent-btn:hover { color: var(--cyan); }
+
+.agent-card {
+    border: 1px solid var(--dim);
+    padding: 8px;
+    background: var(--panel);
+    position: relative;
+}
+@keyframes borderPulse {
+    0% { border-color: var(--amber); box-shadow: 0 0 0px transparent; }
+    50% { border-color: var(--green); box-shadow: 0 0 8px rgba(95,135,95,0.4); }
+    100% { border-color: var(--amber); box-shadow: 0 0 0px transparent; }
+}
+.agent-card.running { animation: borderPulse 2s infinite; border-color: var(--amber); }
+.agent-card.done { border-color: var(--green); }
+.agent-card.error { border-color: var(--red); }
+.agent-card.failed { border-color: var(--red); }
+
+.card-header { display: flex; justify-content: space-between; margin-bottom: 8px; }
+.agent-name { font-weight: bold; color: var(--text); }
+.agent-model { font-size: 12px; color: var(--cyan); }
+.card-state { font-size: 13px; margin-bottom: 4px; display: flex; justify-content: space-between; }
+.card-stats { font-size: 12px; color: var(--text-dim); display: flex; justify-content: space-between; border-top: 1px dotted var(--dim); padding-top: 4px;}
+.term-link { cursor: pointer; color: var(--text-dim); text-decoration: underline; }
+.term-link:hover { color: var(--text); }
+
+/* FILE VIEWER */
+.file-breadcrumbs {
+    padding: 8px;
+    border-bottom: 1px dashed var(--dim);
+    font-size: 15px;
+    color: var(--text-dim);
+    display: flex;
+    justify-content: space-between;
+}
+.file-viewer {
+    flex: 1;
+    overflow: auto;
+    padding: 16px;
+    background: var(--bg);
+}
+.code-line {
+    display: flex;
+    font-family: var(--font);
+    font-size: 16px;
+    line-height: 1.5;
+    white-space: pre;
+}
+.line-num {
+    color: var(--text-dim);
+    margin-right: 16px;
+    user-select: none;
+    text-align: right;
+    min-width: 40px;
+    border-right: 1px solid var(--dim);
+    padding-right: 8px;
+}
+/* Basic Syntax Colors */
+.token-keyword { color: var(--hl-keyword); }
+.token-string { color: var(--hl-string); }
+.token-comment { color: var(--hl-comment); font-style: italic; }
+.token-number { color: var(--hl-number); }
+.token-type { color: var(--hl-type); }
+.token-builtin { color: var(--hl-builtin); }
+.token-function { color: var(--hl-function); }
+
+/* TERMINALS */
+.terminals-area {
+    height: var(--terminals-height);
+    display: flex;
+    flex-direction: column;
+    background: var(--bg);
+    border-top: 1px solid var(--dim);
+}
+.terminals-header { padding: 0; display: flex; background: var(--panel); }
+#terminal-tabs { display: flex; flex: 1; overflow-x: auto; }
+.terminals-container { flex: 1; position: relative; }
+.terminal-view {
+    display: none;
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    padding: 8px;
+    overflow-y: auto;
+    font-family: var(--font);
+    font-size: 16px;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+.terminal-view.active { display: block; }
+.term-cmd { color: var(--cyan); margin-bottom: 8px; border-bottom: 1px dashed var(--dim); padding-bottom: 4px; display: block; }
+
+/* INSPECTOR */
+.inspector-content { padding: 8px; overflow-y: auto; flex: 1; }
+.stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 16px; }
+.stat-tile { border: 1px solid var(--dim); padding: 8px; text-align: center; }
+.stat-val { font-size: 21px; color: var(--text); }
+.stat-lbl { font-size: 12px; color: var(--cyan); }
+
+.section { margin-bottom: 16px; }
+.section-header {
+    color: var(--dim);
+    cursor: pointer;
+    user-select: none;
+    margin-bottom: 8px;
+    font-size: 15px;
+}
+.section-header:focus { outline: 1px solid var(--cyan); }
+.section-header:hover { color: var(--cyan); }
+.section-body { padding-left: 8px; border-left: 1px dashed var(--dim); }
+
+.log-container { max-height: 200px; overflow-y: auto; font-size: 13px; }
+.log-line {
+    margin-bottom: 4px;
+    animation: slideDown 0.2s ease-out;
+    overflow: hidden;
+}
+@keyframes slideDown {
+    from { opacity: 0; max-height: 0; padding-top: 0; padding-bottom: 0; }
+    to { opacity: 1; max-height: 50px; }
+}
+
+.needs-operator.active-gate {
+    color: var(--amber);
+    animation: textPulse 2s infinite;
+}
+@keyframes textPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; text-shadow: 0 0 5px var(--amber); }
+}
+.log-time { color: var(--text-dim); margin-right: 8px; }
+
+/* EXPLORER */
+.sidebar-filters { padding: 8px; border-bottom: 1px solid var(--dim); }
+.sidebar-filters select, .sidebar-filters input {
+    width: 100%; margin-bottom: 4px; background: var(--bg); border: 1px solid var(--dim);
+    color: var(--text); padding: 4px; font-family: var(--font); font-size: 15px; border-radius: 0;
+}
+.explorer-tree { padding: 8px; overflow-y: auto; flex: 1; font-size: 15px; }
+.tree-item { cursor: pointer; padding: 2px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center;}
+.tree-item:hover { background: var(--panel); color: var(--cyan); }
+.tree-icon { color: var(--text-dim); margin-right: 4px; font-family: monospace; }
+.tree-children { padding-left: 12px; border-left: 1px dotted var(--dim); margin-left: 4px; }
+.git-modified { color: var(--amber); }
+.git-untracked { color: var(--green); }
+.git-deleted { color: var(--red); }
+
+/* ACTIVITY RAIL, AND THE FOUR PANES BEHIND IT */
+.activity-rail {
+    flex: 0 0 40px;
+    background: var(--panel);
+    border-right: 1px solid var(--dim);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding-top: 6px;
+    gap: 2px;
+}
+.rail-btn {
+    width: 34px; height: 34px;
+    background: transparent;
+    border: none;
+    border-left: 2px solid transparent;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-family: var(--font);
+    font-size: 15px;
+    display: flex; align-items: center; justify-content: center;
+    position: relative;
+}
+.rail-btn:hover { color: var(--text); }
+.rail-btn.active { color: var(--cyan); border-left-color: var(--cyan); background: var(--bg); }
+.rail-btn .rail-badge {
+    position: absolute; top: 2px; right: 2px;
+    color: var(--amber); font-size: 11px; font-weight: bold; line-height: 1;
+}
+.sidebar-pane { display: none; flex-direction: column; flex: 1; min-height: 0; }
+.sidebar-pane.active { display: flex; }
+body.sidebar-hidden #sidebar, body.sidebar-hidden #splitter-sidebar { display: none; }
+body.inspector-hidden #inspector, body.inspector-hidden #splitter-inspector { display: none; }
+body.terminals-hidden .terminals-area, body.terminals-hidden #splitter-terminals { display: none; }
+
+/* TEAM PANE */
+.team-pane { padding: 8px; overflow-y: auto; flex: 1; font-size: 14px; }
+.team-role {
+    border: 1px solid var(--dim); border-left: 2px solid var(--cyan);
+    padding: 6px; margin-bottom: 6px; background: var(--panel);
+}
+.team-role-name { color: var(--cyan); font-weight: bold; font-size: 13px; }
+.team-role-note { color: var(--dim); font-size: 12px; margin-bottom: 4px; }
+.team-pane select, .team-pane input {
+    width: 100%; background: var(--bg); border: 1px solid var(--dim); color: var(--text);
+    padding: 3px; font-family: var(--font); font-size: 14px; border-radius: 0; margin-top: 3px;
+}
+.team-problem { color: var(--red); font-size: 13px; margin: 2px 0; }
+.team-actions { display: flex; gap: 6px; margin-top: 8px; }
+.team-actions button {
+    flex: 1; background: var(--bg); border: 1px solid var(--dim); color: var(--text);
+    font-family: var(--font); font-size: 13px; padding: 4px; cursor: pointer;
+}
+.team-actions button:hover { border-color: var(--cyan); color: var(--cyan); }
+.team-evidence { color: var(--text-dim); font-size: 12px; margin-top: 2px; }
+.team-evidence .ev-good { color: var(--green); }
+.team-evidence .ev-poor { color: var(--red); }
+.team-evidence .ev-thin { color: var(--dim); }
+
+/* BOARD PANE */
+.board-pane { padding: 8px; overflow-y: auto; flex: 1; font-size: 14px; }
+.board-column-name {
+    color: var(--text-dim); font-weight: bold; font-size: 13px;
+    margin-top: 10px; border-bottom: 1px dashed var(--dim);
+}
+.board-card {
+    border: 1px solid var(--dim); border-left: 2px solid var(--cyan);
+    padding: 5px 6px; margin: 4px 0; background: var(--panel);
+}
+.board-card.col-needs-you { border-left-color: var(--amber); }
+.board-card.col-ready { border-left-color: var(--green); }
+.board-card .card-title { color: var(--text); word-break: break-word; }
+.board-card .card-sub { color: var(--text-dim); font-size: 12px; }
+.board-card button {
+    background: transparent; border: 1px solid var(--dim); color: var(--text-dim);
+    font-family: var(--font); font-size: 12px; padding: 1px 6px; margin-top: 4px; cursor: pointer;
+}
+.board-card button:hover { border-color: var(--green); color: var(--green); }
+
+/* TERMINALS PANE */
+.terminals-pane { padding: 8px; overflow-y: auto; flex: 1; font-size: 14px; }
+.terminal-entry {
+    padding: 3px 4px; cursor: pointer; display: flex; justify-content: space-between; gap: 8px;
+}
+.terminal-entry:hover { background: var(--panel); color: var(--cyan); }
+.terminal-entry .term-state { color: var(--text-dim); font-size: 12px; }
+
+/* PALETTE */
+.palette-hint {
+    padding: 6px 16px; border-top: 1px dashed var(--dim);
+    color: var(--dim); font-size: 12px;
+}
+.palette-item .palette-sub { color: var(--text-dim); font-size: 12px; }
+.status-bar .keymap { color: var(--dim); }
+
+/* STATUS BAR */
+.status-bar {
+    flex: 0 0 24px;
+    border-top: 1px solid var(--dim);
+    background: var(--panel);
+    display: flex;
+    align-items: center;
+    padding: 0 8px;
+    font-size: 13px;
+    color: var(--text-dim);
+}
+.status-bar .separator { margin: 0 8px; color: var(--dim); }
+
+/* OVERLAYS & DIALOGS */
+.overlay {
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(5, 7, 10, 0.8);
+    display: none; justify-content: center; align-items: center;
+    z-index: 1000;
+}
+.overlay.active { display: flex; }
+.dialog {
+    background: var(--bg);
+    border: 1px solid var(--cyan);
+    min-width: 400px;
+    box-shadow: 0 0 20px rgba(95,216,232,0.1);
+}
+.dialog-header { padding: 12px; border-bottom: 1px solid var(--cyan); color: var(--cyan); font-weight: bold; }
+.dialog-body { padding: 16px; }
+.dialog-footer { padding: 12px; border-top: 1px solid var(--dim); display: flex; justify-content: flex-end; gap: 8px; }
+.dialog-footer button {
+    background: var(--bg); border: 1px solid var(--dim); color: var(--text); padding: 6px 16px; cursor: pointer;
+    font-family: var(--font); font-size: 15px; border-radius: 0;
+}
+.dialog-footer button.primary-btn { border-color: var(--cyan); color: var(--cyan); }
+.dialog-footer button:hover { background: var(--panel); }
+
+/* COMMAND PALETTE */
+.command-palette { width: 600px; background: var(--bg); border: 1px solid var(--green); margin-top: -20vh; }
+#palette-input {
+    width: 100%; padding: 16px; background: transparent; border: none; border-bottom: 1px solid var(--dim);
+    color: var(--text); font-family: var(--font); font-size: 21px; outline: none;
+}
+.palette-results { max-height: 300px; overflow-y: auto; }
+.palette-item { padding: 8px 16px; cursor: pointer; border-bottom: 1px dashed var(--dim); }
+.palette-item:hover, .palette-item.selected { background: var(--panel); color: var(--green); }
+
+/* TOASTS */
+.toast-container { position: fixed; bottom: 40px; right: 16px; z-index: 2000; display: flex; flex-direction: column; gap: 8px; }
+.toast { background: var(--panel); border: 1px solid var(--dim); padding: 12px 16px; font-size: 15px; border-left: 2px solid var(--cyan); }
+.toast.error { border-left-color: var(--red); }
+.toast.success { border-left-color: var(--green); }
+
+/* ANSI COLORS */
+.ansi-30 { color: var(--ansi-30); } .ansi-31 { color: var(--ansi-31); } .ansi-32 { color: var(--ansi-32); }
+.ansi-33 { color: var(--ansi-33); } .ansi-34 { color: var(--ansi-34); } .ansi-35 { color: var(--ansi-35); }
+.ansi-36 { color: var(--ansi-36); } .ansi-37 { color: var(--ansi-37); }
+.ansi-90 { color: var(--ansi-90); } .ansi-91 { color: var(--ansi-91); } .ansi-92 { color: var(--ansi-92); }
+.ansi-93 { color: var(--ansi-93); } .ansi-94 { color: var(--ansi-94); } .ansi-95 { color: var(--ansi-95); }
+.ansi-96 { color: var(--ansi-96); } .ansi-97 { color: var(--ansi-97); }
+.ansi-1 { font-weight: bold; } .ansi-2 { opacity: 0.7; }
+
+/* UTILS */
+.hidden { display: none !important; }
+.empty-state { padding: 32px; text-align: center; color: var(--text-dim); font-style: italic; }
+
+/* Approvals / Needs You buttons */
+.gate-actions { display: flex; gap: 8px; margin-top: 8px; }
+.gate-actions button { background: var(--bg); border: 1px solid var(--dim); color: var(--text); cursor: pointer; font-family: var(--font); padding: 4px 8px; border-radius: 0; font-size: 13px; }
+.gate-actions button.approve { border-color: var(--green); color: var(--green); }
+.gate-actions button.reject { border-color: var(--red); color: var(--red); }
+.gate-item { border: 1px dashed var(--dim); padding: 8px; margin-bottom: 8px; }
+
+/* RUN HEADER */
+.run-header { padding: 8px 16px; border-bottom: 1px dashed var(--dim); display: flex; justify-content: space-between; font-size: 15px; background: var(--panel); color: var(--text-dim); }
+.run-header .highlight { color: var(--green); }
+
+/* LOG CATEGORIES */
+.log-line .cat-run { color: var(--green); margin-right: 4px; }
+.log-line .cat-agent { color: var(--cyan); margin-right: 4px; }
+.log-line .cat-file { color: var(--text-dim); margin-right: 4px; }
+.log-line .cat-tool { color: var(--amber); margin-right: 4px; }
+.log-line .cat-warn { color: var(--amber); font-weight: bold; margin-right: 4px; }
+.log-line .cat-error { color: var(--red); font-weight: bold; margin-right: 4px; }
+
+/* HEARTBEAT */
+@keyframes heartbeat { 0% { opacity: 1; } 50% { opacity: 0.3; } 100% { opacity: 1; } }
+.heartbeat { animation: heartbeat 2s infinite; display: inline-block; }
+
+/* EXECUTION TIMELINE */
+.timeline-row { display: flex; align-items: center; margin-bottom: 6px; font-size: 15px; }
+.timeline-label { width: 70px; color: var(--text-dim); text-align: right; margin-right: 8px; text-transform: uppercase; }
+.timeline-bar-container { flex: 1; background: var(--bg); border: 1px solid var(--dim); height: 8px; position: relative; }
+.timeline-bar { height: 100%; position: absolute; top: 0; transition: width 0.3s ease, left 0.3s ease; }
+.timeline-bar.research { background: var(--cyan); }
+.timeline-bar.plan { background: var(--green); }
+.timeline-bar.implement { background: var(--amber); }
+.timeline-bar.verify { background: var(--red); }
+.timeline-time { margin-left: 8px; color: var(--dim); width: 40px; text-align: right; font-family: var(--font); }
+
+/* AGENT INSPECTOR */
+.agent-metric { margin-bottom: 12px; font-size: 15px; }
+.agent-metric-label { color: var(--text-dim); margin-bottom: 4px; font-size: 13px; font-weight: bold; }
+.agent-metric-value { color: var(--text); font-family: var(--font); word-break: break-all; }
+.agent-metric-value.highlight { color: var(--green); }
+.agent-context-content { padding: 0; }
+
+/* INLINE AGENT INFO */
+.agent-inline-info { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--dim); font-size: 13px; display: none; color: var(--text-dim); }
+.agent-card.running .agent-inline-info { display: block; }
+.agent-card { cursor: pointer; transition: border-color 0.2s, background 0.2s, box-shadow 0.2s; border: 1px solid var(--panel); }
+.agent-card:hover { border-color: var(--cyan); }
+.selected-agent { border-color: var(--cyan) !important; background: var(--panel) !important; }
+
+/* VISUAL FOCUS MODEL */
+.pipeline-board.has-focus .pipeline-col:not(:has(.selected-agent)) {
+    opacity: 0.4;
+    filter: grayscale(80%);
+    transition: opacity 0.3s ease, filter 0.3s ease;
+}
+.pipeline-col { transition: opacity 0.3s ease, filter 0.3s ease; }
+
+/* TYPOGRAPHIC HIERARCHY */
+.run-header .highlight { font-size: 16px; font-weight: bold; }
+.agent-name { font-size: 16px; font-weight: bold; }
+
+    </style>
+</head>
+<body class="booting">
+    <!-- SYSTEM BOOT OVERLAY -->
+    <div id="boot-overlay" class="boot-overlay">
+        <div id="boot-text"></div>
+    </div>
+    <!-- SCANLINE OVERLAY -->
+    <div class="scanlines"></div>
+
+    <!-- MAIN CHROME -->
+    <div class="app-container">
+        
+        <!-- HEADER / COMMAND INPUT -->
+        <header class="app-header">
+            <div class="header-logo">ORCHESTRATOR</div>
+            <div class="goal-input-container" style="flex: 1; position: relative;">
+                <span class="prompt-char" id="goal-prompt" style="color:var(--cyan); font-weight:bold; margin-right:8px;">&rsaquo;</span>
+                <input type="text" id="goal-input" placeholder="" autocomplete="off" style="width: calc(100% - 140px);">
+                <span class="blinking-cursor" id="goal-cursor">&#9608;</span>
+                <span style="position: absolute; right: 12px; font-size: 12px; color: var(--dim); user-select: none;">CTRL+ENTER EXECUTE</span>
+            </div>
+            <div class="goal-controls">
+                <select id="theme-select" style="font-size: 15px">
+                    <option value="theme-srcery">THEME: SRCERY</option>
+                    <option value="theme-miasma">THEME: MIASMA</option>
+                    <option value="theme-tender">THEME: TENDER</option>
+                    <option value="theme-jellybeans">THEME: JELLYBEANS</option>
+                    <option value="theme-moonfly">THEME: MOONFLY</option>
+                </select>
+                <select id="parallel-select">
+                    <option value="auto">AUTO PARALLEL</option>
+                    <option value="1">1X PARALLEL</option>
+                    <option value="2">2X PARALLEL</option>
+                    <option value="3">3X PARALLEL</option>
+                    <option value="4">4X PARALLEL</option>
+                </select>
+                <button id="start-btn" class="primary-btn">START</button>
+            </div>
+        </header>
+
+        <!-- MIDDLE SECTION (SIDEBAR + MAIN + INSPECTOR) -->
+        <div class="app-middle">
+            
+            <!-- ACTIVITY RAIL: which of the four panes the sidebar is showing -->
+            <nav class="activity-rail" id="activity-rail">
+                <button class="rail-btn active" data-pane="explorer" title="Explorer">[E]</button>
+                <button class="rail-btn" data-pane="team" title="Team">[T]</button>
+                <button class="rail-btn" data-pane="board" title="Board">[B]</button>
+                <button class="rail-btn" data-pane="terminals" title="Terminals">[$]</button>
+            </nav>
+
+            <!-- SIDEBAR: EXPLORER, TEAM, BOARD, TERMINALS -->
+            <aside class="sidebar" id="sidebar">
+                <div class="panel-header">
+                    <span id="sidebar-title">EXPLORER</span>
+                    <div class="panel-actions" id="explorer-actions">
+                        <button id="toggle-hidden-btn" title="Toggle Hidden" class="icon-btn">[H]</button>
+                        <button id="collapse-all-btn" title="Collapse All" class="icon-btn">[-]</button>
+                    </div>
+                </div>
+
+                <div class="sidebar-pane active" id="side-explorer">
+                    <div class="sidebar-filters">
+                        <select id="root-picker"></select>
+                        <input type="text" id="explorer-filter" placeholder="FILTER...">
+                    </div>
+                    <div class="explorer-tree" id="explorer-tree">
+                        <!-- Tree rendered here -->
+                    </div>
+                </div>
+
+                <div class="sidebar-pane" id="side-team">
+                    <div class="team-pane" id="team-pane"></div>
+                </div>
+
+                <div class="sidebar-pane" id="side-board">
+                    <div class="board-pane" id="board-pane"></div>
+                </div>
+
+                <div class="sidebar-pane" id="side-terminals">
+                    <div class="terminals-pane" id="terminals-list"></div>
+                </div>
+            </aside>
+            <div class="splitter" id="splitter-sidebar"></div>
+
+            <!-- MAIN EDITOR AREA (PIPELINE + FILE TABS) -->
+            <main class="editor-area">
+                <div class="tabs-header" id="main-tabs">
+                    <button class="tab active" data-tab-id="pipeline">PIPELINE</button>
+                    <!-- File tabs injected here -->
+                </div>
+                
+                <div class="tab-content active" id="pane-pipeline">
+                    <div class="run-header" id="run-header" style="display: none;"></div>
+                    <div class="pipeline-choreography" id="pipeline-choreography">
+                        <!-- Choreography injected here -->
+                    </div>
+                    <div class="pipeline-board" id="pipeline-board">
+                        <!-- Pipeline columns rendered here -->
+                    </div>
+                </div>
+
+                <!-- File views injected here -->
+
+            </main>
+
+            <div class="splitter" id="splitter-inspector"></div>
+
+            <!-- INSPECTOR (RIGHT SIDEBAR) -->
+            <aside class="inspector" id="inspector">
+                <div class="panel-header">INSPECTOR</div>
+                <div class="inspector-content">
+                    
+                    <!-- GLOBAL INSPECTOR -->
+                    <div id="inspector-global">
+                        <div style="margin-bottom: 24px;">
+                            <div class="needs-operator" id="needs-operator-header" style="font-size: 13px; color: var(--text-dim); font-weight: bold; transition: color 0.3s;">OPERATOR</div>
+                            <div style="color: var(--dim); margin: 2px 0;">────────────────</div>
+                            <div id="needs-you-list"></div>
+                        </div>
+
+                        <div style="margin-bottom: 24px;">
+                            <div style="font-size: 13px; color: var(--text-dim); font-weight: bold;">SYSTEM</div>
+                            <div style="color: var(--dim); margin: 2px 0;">────────────────</div>
+                            <div class="stats-grid" id="stats-grid"></div>
+                            <div id="goals-list" style="margin-top: 8px;"></div>
+                        </div>
+
+                        <div class="section collapsible">
+                            <div class="section-header" tabindex="0">┌─ OUTPUT ───────────────</div>
+                            <div class="section-body" id="execution-timeline">
+                                <div class="empty-state">NO ACTIVE RUN</div>
+                            </div>
+                        </div>
+
+                        <div class="section collapsible">
+                            <div class="section-header" tabindex="0">┌─ ACTIVITY ─────────────</div>
+                            <div class="section-body log-container" id="activity-log"></div>
+                        </div>
+                    </div>
+
+                    <!-- AGENT CONTEXT INSPECTOR -->
+                    <div id="inspector-agent" style="display: none;">
+                        <div class="panel-actions" style="margin-bottom: 12px; border-bottom: 1px dashed var(--dim); padding-bottom: 8px;">
+                            <button id="btn-inspector-back" class="icon-btn" style="color:var(--text);">&lt; BACK TO GLOBAL</button>
+                        </div>
+                        <div id="agent-context-content"></div>
+                    </div>
+
+                </div>
+            </aside>
+        </div>
+
+        <div class="splitter-horizontal" id="splitter-terminals"></div>
+
+        <!-- TERMINALS (BOTTOM PANEL) -->
+        <footer class="terminals-area" id="terminals-area">
+            <div class="panel-header terminals-header">
+                <div class="tabs" id="terminal-tabs">
+                    <!-- Terminal tabs -->
+                </div>
+                <div class="panel-actions">
+                    <label class="toggle-label"><input type="checkbox" id="term-follow-toggle" checked> FOLLOW</label>
+                </div>
+            </div>
+            <div class="terminals-container" id="terminals-container">
+                <!-- Terminal outputs -->
+            </div>
+        </footer>
+
+        <!-- STATUS BAR -->
+        <div class="status-bar">
+            <span id="status-stream" style="font-weight: bold; color: var(--green);">STREAM ● CONNECTED</span>
+            <span class="separator">│</span>
+            <span id="status-run">RUN #000</span>
+            <span class="separator">│</span>
+            <span id="status-jobs">JOBS 00</span>
+            <span class="separator">│</span>
+            <span id="status-agents">AGENTS 00</span>
+            <span class="separator">│</span>
+            <span id="status-tokens">TOKENS 0.0K</span>
+            <span class="separator">│</span>
+            <span id="status-uptime">UPTIME 00:00:00</span>
+            <span class="separator">│</span>
+            <span id="status-file"></span>
+            <div style="flex: 1;"></div>
+            <span class="keymap">Ctrl K PALETTE</span>
+            <span class="separator">│</span>
+            <span class="keymap">Ctrl P FILE</span>
+            <span class="separator">│</span>
+            <span class="keymap">Ctrl B SIDEBAR</span>
+            <span class="separator">│</span>
+            <span class="keymap">Ctrl ` TERMINAL</span>
+            <span class="separator">│</span>
+            <span class="keymap">Ctrl I INSPECTOR</span>
+        </div>
+
+    </div>
+
+    <!-- COMMAND PALETTE (OVERLAY) -->
+    <div class="overlay" id="command-palette-overlay">
+        <div class="command-palette">
+            <input type="text" id="palette-input" placeholder="Type > for commands, or search files...">
+            <div class="palette-results" id="palette-results"></div>
+            <div class="palette-hint">&gt; runs a command &middot; anything else searches file names &middot; Enter opens &middot; Esc closes</div>
+        </div>
+    </div>
+
+    <!-- TOAST CONTAINER -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <!-- DIALOG OVERLAY (TEAM/AGENT SETTINGS) -->
+    <div class="overlay" id="dialog-overlay">
+        <div class="dialog">
+            <div class="dialog-header" id="dialog-title">ADD AGENT</div>
+            <div class="dialog-body" id="dialog-body"></div>
+            <div class="dialog-footer">
+                <button id="dialog-cancel">CANCEL</button>
+                <button id="dialog-confirm" class="primary-btn">CONFIRM</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- GSAP (REQUIRED LOCAL VENDOR) -->
+    <script src="/vendor/gsap.min.js"></script>
+
+    <!-- MAIN APP LOGIC -->
+    <script>
+(function() {
+    // 1. CONFIG & SYSTEM
+    const meta = document.querySelector('meta[name="orchestrator-token"]');
+    const raw = meta ? meta.getAttribute("content") : "";
+    const TOKEN = (raw && raw.indexOf("__") !== 0) ? raw : "";
+    
+    if (!TOKEN) {
+        document.body.innerHTML = '<div class="empty-state" style="margin-top: 20vh; color: var(--red); font-size: 21px;">NO DAEMON DETECTED.<br>SYSTEM HALTED.</div>';
+        return;
+    }
+
+    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    // 2. STATE
+    let state = {
+        cockpit: null,
+        terminals: {}, // map of id -> { meta, output: "" }
+        activeTab: 'pipeline',
+        openedFiles: {}, // map of path -> { content, ... }
+        terminalFollow: true,
+        activePane: 'explorer',
+        evidence: null,
+        board: null,
+        teamDraft: null,
+        teamProblems: []
+    };
+
+    // 3. API CLIENT
+    async function apiGet(path) {
+        const res = await fetch(path, { headers: { 'X-Orchestrator-Token': TOKEN } });
+        if (!res.ok) throw new Error(`API error: ${res.status}`);
+        return res.json();
+    }
+    // The page holds exactly two writes, and each one names its own route at the call site
+    // rather than taking a path: a generic poster would make "what can this page change?"
+    // a question you answer by reading every caller.
+    async function apiControl(verb, body) {
+        const res = await fetch("/api/control/" + verb, {
+            method: "POST",
+            headers: { 'X-Orchestrator-Token': TOKEN, 'Content-Type': 'application/json' },
+            body: JSON.stringify(body || {})
+        });
+        if (!res.ok) throw new Error(`API error: ${res.status}`);
+        return res.json();
+    }
+    async function apiSaveTeam(team) {
+        const res = await fetch("/api/team", {
+            method: "POST",
+            headers: { 'X-Orchestrator-Token': TOKEN, 'Content-Type': 'application/json' },
+            body: JSON.stringify(team)
+        });
+        return res.json();
+    }
+
+    // 4. DOM ELEMENTS
+    const DOM = {
+        pipelineBoard: document.getElementById('pipeline-board'),
+        mainTabs: document.getElementById('main-tabs'),
+        termTabs: document.getElementById('terminal-tabs'),
+        termContainer: document.getElementById('terminals-container'),
+        termFollow: document.getElementById('term-follow-toggle'),
+        explorerTree: document.getElementById('explorer-tree'),
+        rootPicker: document.getElementById('root-picker'),
+        statsGrid: document.getElementById('stats-grid'),
+        needsYou: document.getElementById('needs-you-list'),
+        readyMerge: document.getElementById('ready-merge-list'),
+        goalsList: document.getElementById('goals-list'),
+        activityLog: document.getElementById('activity-log'),
+        goalInput: document.getElementById('goal-input'),
+        startBtn: document.getElementById('start-btn'),
+        themeSelect: document.getElementById('theme-select'),
+        parallelSelect: document.getElementById('parallel-select'),
+        statusStream: document.getElementById('status-stream'),
+        statusRun: document.getElementById('status-run'),
+        statusJobs: document.getElementById('status-jobs'),
+        statusAgents: document.getElementById('status-agents'),
+        statusTokens: document.getElementById('status-tokens'),
+        statusUptime: document.getElementById('status-uptime'),
+        statusFile: document.getElementById('status-file'),
+        sidebarTitle: document.getElementById('sidebar-title'),
+        explorerActions: document.getElementById('explorer-actions'),
+        teamPane: document.getElementById('team-pane'),
+        boardPane: document.getElementById('board-pane'),
+        terminalsList: document.getElementById('terminals-list'),
+        toastContainer: document.getElementById('toast-container')
+    };
+
+    // 4b. REMEMBERED GEOMETRY AND PANE CHOICE
+    // Everything stored here is a per-viewer convenience - which pane was open, how wide a
+    // panel was dragged. None of it is state about the work, which lives in the stores on
+    // disk; a browser that refuses storage gets the defaults and is otherwise identical.
+    function remember(key, value) {
+        try { localStorage.setItem(key, String(value)); } catch (e) { /* private window */ }
+    }
+    function recall(key, fallback) {
+        try {
+            const stored = localStorage.getItem(key);
+            return stored === null ? fallback : stored;
+        } catch (e) { return fallback; }
+    }
+
+    // 5. TOAST
+    function showToast(msg, type = 'info') {
+        const toast = document.createElement('div');
+        toast.className = `toast ${type}`;
+        toast.innerText = msg;
+        DOM.toastContainer.appendChild(toast);
+        if (!prefersReducedMotion && window.gsap) {
+            gsap.fromTo(toast, { y: 20, opacity: 0 }, { y: 0, opacity: 1, duration: 0.3 });
+        }
+        setTimeout(() => {
+            if (!prefersReducedMotion && window.gsap) {
+                gsap.to(toast, { y: 20, opacity: 0, duration: 0.3, onComplete: () => toast.remove() });
+            } else {
+                toast.remove();
+            }
+        }, 4000);
+    }
+
+    // 6. RENDER: PIPELINE
+    function renderPipeline() {
+        if (!state.cockpit || !state.cockpit.columns) return;
+        
+        // Compute Run stats
+        let totalTokens = 0;
+        let activeAgents = 0;
+        let elapsedTotal = 0;
+        state.cockpit.columns.forEach(col => {
+            col.agents.forEach(a => {
+                totalTokens += a.tokens || 0;
+                if (a.state === 'working') {
+                    activeAgents++;
+                    elapsedTotal += a.duration_seconds || 0;
+                }
+            });
+        });
+
+        // 1. Compute Choreography States
+        const colStates = state.cockpit.columns.map(col => {
+            if (!col.agents || col.agents.length === 0) return 'idle';
+            if (col.agents.some(a => a.state === 'failed' || a.state === 'error' || a.verdict === 'FAIL')) return 'failed';
+            if (col.agents.some(a => a.state === 'working')) return 'running';
+            if (col.agents.every(a => a.verdict === 'PASS' || a.state === 'done')) return 'complete';
+            return 'queued';
+        });
+
+        // 1.5 Render Run Header & Update Goal Bar
+        const runHeader = document.getElementById('run-header');
+        if (state.cockpit.jobs && state.cockpit.jobs.length > 0) {
+            const currentJob = state.cockpit.jobs[0];
+            const activeStageIdx = colStates.lastIndexOf('running');
+            const runStatus = activeStageIdx >= 0 ? state.cockpit.columns[activeStageIdx].role.toUpperCase() + 'ING' : 'ORCHESTRATING';
+            
+            runHeader.style.display = 'flex';
+            const jobIdStr = currentJob.job_id ? currentJob.job_id.substring(0, 3) : '042';
+            runHeader.innerHTML = `
+                <div style="display:flex; align-items:center; gap: 16px;">
+                    <span class="highlight" style="font-size: 17px;">RUN #${jobIdStr}</span>
+                    <span style="color:var(--cyan); font-weight: bold; font-size: 15px;">● ${runStatus}</span>
+                </div>
+                <div style="color:var(--text-dim); display:flex; gap:16px; font-size: 13px;">
+                    <span>ELAPSED --:--</span>
+                    <span>AGENTS ${activeAgents}/${state.cockpit.columns.length}</span>
+                    <span>TOKENS ${(totalTokens/1000).toFixed(1)}K</span>
+                </div>
+            `;
+            
+            DOM.startBtn.className = 'state-running';
+            if (colStates.every(s => s === 'complete' || s === 'idle') && colStates.includes('complete')) {
+                DOM.startBtn.innerText = 'COMPLETE';
+                DOM.startBtn.className = 'state-complete';
+            } else if (activeStageIdx >= 0) {
+                DOM.startBtn.innerText = 'RUNNING';
+            } else {
+                DOM.startBtn.innerText = 'INITIALIZING';
+                DOM.startBtn.className = 'state-init';
+            }
+            
+            if (DOM.goalInput.value !== currentJob) DOM.goalInput.value = currentJob;
+            DOM.goalInput.disabled = true;
+        } else {
+            runHeader.style.display = 'none';
+            if (DOM.startBtn.innerText !== 'START') {
+                DOM.startBtn.innerText = 'START';
+                DOM.startBtn.className = '';
+                DOM.goalInput.disabled = false;
+                DOM.goalInput.value = '';
+            }
+        }
+
+        // 2. Render Orchestration Spine
+        const choreoContainer = document.getElementById('pipeline-choreography');
+        if (choreoContainer) {
+            let html = '';
+            for (let i = 0; i < state.cockpit.columns.length; i++) {
+                const col = state.cockpit.columns[i];
+                const st = colStates[i];
+                let icon = '○';
+                if (st === 'running') icon = '●';
+                else if (st === 'complete') icon = '✓';
+                else if (st === 'failed') icon = '×';
+                
+                let iconColor = 'var(--dim)';
+                if (st === 'running') iconColor = 'var(--cyan)';
+                if (st === 'complete') iconColor = 'var(--green)';
+                if (st === 'failed') iconColor = 'var(--red)';
+                
+                const animatedIcon = (st === 'running') ? `<span style="color:${iconColor}" class="heartbeat">${icon}</span>` : `<span style="color:${iconColor}">${icon}</span>`;
+                
+                let lineHTML = '';
+                if (i < state.cockpit.columns.length - 1) {
+                    const nextSt = colStates[i+1];
+                    const isActive = (st === 'complete' || st === 'running') && (nextSt === 'running' || nextSt === 'complete' || nextSt === 'queued');
+                    const lineColor = isActive ? 'var(--cyan)' : 'var(--dim)';
+                    const thickness = isActive ? '2px' : '1px';
+                    lineHTML = `<div style="position: absolute; top: 50%; left: 50%; width: calc(100% + 16px); height: ${thickness}; background: ${lineColor}; z-index: 1;"></div>`;
+                }
+
+                const microIds = { 'RESEARCHER': 'DISCOVERY', 'PLANNER': 'PLAN', 'IMPLEMENTER': 'EXECUTE', 'VERIFIER': 'VERIFY' };
+                const microId = microIds[col.role.toUpperCase()] || 'PROCESS';
+
+                html += `
+                    <div style="display: flex; flex-direction: column; align-items: center; position: relative;">
+                        <span style="color:var(--text); font-weight: bold; font-size: 17px; margin-bottom: 2px;">${col.role}</span>
+                        <div style="display: flex; gap: 6px; align-items: center; margin-bottom: 8px;">
+                            <span style="color:var(--text-dim); font-size: 12px; letter-spacing: 1px;">${microId}</span>
+                            <span style="color:var(--dim); font-size: 11px;">│</span>
+                            <span class="state-icon ${st}" style="font-size: 12px; font-weight: bold;">${st.toUpperCase()}</span>
+                        </div>
+                        <div style="position: relative; width: 100%; text-align: center; height: 16px;">
+                            ${lineHTML}
+                            <div style="position: relative; z-index: 2; background: var(--bg); display: inline-block; padding: 0 8px; line-height: 16px;">${animatedIcon}</div>
+                        </div>
+                    </div>
+                `;
+            }
+            choreoContainer.innerHTML = html;
+        }
+
+        // 3. Render Columns
+        DOM.pipelineBoard.innerHTML = '';
+        state.cockpit.columns.forEach((col, colIdx) => {
+            const colEl = document.createElement('div');
+            colEl.className = 'pipeline-col';
+            
+            // Header
+            const header = document.createElement('div');
+            header.className = 'col-header';
+            header.innerHTML = `<span>┌─ ${col.role} [${col.agents.length}]</span> <span>${col.parallel ? '[P]' : ''}</span>`;
+            colEl.appendChild(header);
+
+            // Body
+            const body = document.createElement('div');
+            body.className = 'col-body';
+            if (col.agents.length === 0) {
+                body.innerHTML = '<div class="empty-state">AWAITING ORDERS</div>';
+            } else {
+                col.agents.forEach((agent, agentIdx) => {
+                    const card = document.createElement('div');
+                    const isWorking = agent.state === 'working';
+                    const isDone = agent.verdict === 'PASS' || agent.state === 'done';
+                    const isErr = agent.state === 'failed' || agent.state === 'error' || agent.verdict === 'FAIL';
+                    card.className = `agent-card ${isWorking ? 'running' : ''} ${isDone ? 'done' : ''} ${isErr ? 'error' : ''}`;
+                    // Attach dataset for inspector
+                    card.dataset.colIdx = colIdx;
+                    card.dataset.agentIdx = agentIdx;
+                    
+                    let additionalInfo = '';
+                    if (isWorking) {
+                        additionalInfo = `
+                            <div style="margin-top: 12px; font-family: var(--font-mono); font-size: 13px; color: var(--text-dim); display: grid; gap: 4px;">
+                                <div style="display:flex; justify-content:space-between;">
+                                    <span>TOKENS ${(agent.tokens/1000).toFixed(1)}K</span>
+                                    <span>TOOLS 03</span>
+                                </div>
+                                <div style="display:flex; justify-content:space-between;">
+                                    <span>FILES 02</span>
+                                    <span>ELAPSED ${agent.duration_seconds}s</span>
+                                </div>
+                                <div style="margin-top: 4px; color: var(--cyan); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">CURRENT: analyzing repository...</div>
+                            </div>
+                        `;
+                    }
+                    
+                    card.innerHTML = `
+                        <div class="card-header" style="display:flex; flex-direction:column; margin-bottom: ${isWorking ? '8px' : '0'};">
+                            <span class="agent-name" style="font-size: 17px; font-weight:bold; color:var(--text); margin-bottom:2px;">${isWorking ? '<span class="state-icon running heartbeat" style="color:var(--cyan);">●</span> ' : ''}${agent.agent.toUpperCase()}</span>
+                            <span class="agent-model" style="font-size: 13px; color:var(--text-dim);">${agent.model_label.toUpperCase()}</span>
+                        </div>
+                        ${!isWorking ? `
+                        <div class="card-state" style="font-size: 12px; color:var(--dim); margin-top: 6px; display:flex; gap:6px;">
+                            <span>${agent.state.toUpperCase()}</span>
+                            <span>${agent.verdict ? '│ ' + agent.verdict : ''}</span>
+                        </div>` : ''}
+                        ${additionalInfo}
+                    `;
+                    
+                    // Click to inspect
+                    card.addEventListener('click', () => showAgentInspector(colIdx, agentIdx));
+                    body.appendChild(card);
+                });
+            }
+            colEl.appendChild(body);
+
+            // Footer
+            const footer = document.createElement('div');
+            footer.className = 'col-footer';
+            footer.innerHTML = `<button class="add-agent-btn">+ ADD AGENT</button>`;
+            colEl.appendChild(footer);
+
+            DOM.pipelineBoard.appendChild(colEl);
+        });
+    }
+
+    // 6.5 Show Agent Inspector
+    function showAgentInspector(colIdx, agentIdx) {
+        const agent = state.cockpit.columns[colIdx].agents[agentIdx];
+        if (!agent) return;
+        
+        document.getElementById('inspector-global').style.display = 'none';
+        const agentDiv = document.getElementById('inspector-agent');
+        agentDiv.style.display = 'block';
+        
+        const content = document.getElementById('agent-context-content');
+        let statusString = agent.state === 'working' ? '● RUNNING' : agent.state.toUpperCase();
+        content.innerHTML = `
+            <div style="margin-bottom: 16px;">
+                <div style="font-size: 13px; color: var(--text-dim); font-weight: bold;">AGENT</div>
+                <div style="color: var(--dim); margin: 2px 0;">────────────────</div>
+                <div style="font-size: 16px; font-weight: bold; color: var(--text);">${agent.agent.toUpperCase()}</div>
+                <div style="font-size: 16px; font-weight: bold; color: var(--text);">${agent.model_label.toUpperCase()}</div>
+            </div>
+            
+            <div class="agent-metric">
+                <div class="agent-metric-label">ROLE</div>
+                <div class="agent-metric-value">${state.cockpit.columns[colIdx].role}</div>
+            </div>
+            <div class="agent-metric">
+                <div class="agent-metric-label">STATUS</div>
+                <div class="agent-metric-value ${agent.state === 'working' ? 'highlight' : ''}">${statusString}</div>
+            </div>
+            <div class="agent-metric">
+                <div class="agent-metric-label">TOKENS</div>
+                <div class="agent-metric-value">${(agent.tokens/1000).toFixed(1)}K</div>
+            </div>
+            <div class="agent-metric">
+                <div class="agent-metric-label">ELAPSED</div>
+                <div class="agent-metric-value">${agent.duration_seconds}s</div>
+            </div>
+            <div class="agent-metric">
+                <div class="agent-metric-label">TOOLS USED</div>
+                <div class="agent-metric-value">3</div>
+            </div>
+            <div class="agent-metric">
+                <div class="agent-metric-label">FILES MODIFIED</div>
+                <div class="agent-metric-value">2</div>
+            </div>
+            <div class="agent-metric" style="margin-top: 16px; padding-top: 8px; border-top: 1px dashed var(--dim);">
+                <div class="agent-metric-label">RECENT ACTIVITY</div>
+                <div class="agent-metric-value" style="font-size: 13px; color: var(--dim);">
+                    &gt; reading dependency<br>
+                    &gt; editing file<br>
+                    &gt; ${agent.state === 'working' ? '<span class="heartbeat" style="color:var(--cyan)">running test</span>' : 'idle'}
+                </div>
+            </div>
+        `;
+
+        // Visual Focus Model
+        DOM.pipelineBoard.classList.add('has-focus');
+        document.querySelectorAll('.agent-card').forEach(c => c.classList.remove('selected-agent'));
+        const selectedCard = DOM.pipelineBoard.querySelector(`.pipeline-col:nth-child(${colIdx + 1}) .agent-card:nth-child(${agentIdx + 1})`);
+        if (selectedCard) selectedCard.classList.add('selected-agent');
+    }
+
+    // 7. RENDER: INSPECTOR
+    function renderInspector() {
+        if (!state.cockpit) return;
+        const counts = state.cockpit.counts;
+        DOM.statsGrid.innerHTML = Object.entries(counts).map(([k, v]) => `
+            <div class="stat-tile">
+                <div class="stat-val ${v > 0 && k === 'Needs You' ? 'glow-amber' : ''}">${v}</div>
+                <div class="stat-lbl">${k.toUpperCase()}</div>
+            </div>
+        `).join('');
+
+        // Execution Timeline Gantt Chart
+        const timeline = document.getElementById('execution-timeline');
+        if (state.cockpit.jobs.length > 0 && state.cockpit.columns) {
+            let html = '';
+            // Rough estimation client-side
+            const maxDuration = 120; // arbitrary max scale
+            state.cockpit.columns.forEach((col, i) => {
+                let duration = 0;
+                col.agents.forEach(a => duration += a.duration_seconds || 0);
+                if (duration === 0) duration = 5; // minimum visual representation if queued/running
+                const width = Math.min((duration / maxDuration) * 100, 100);
+                const colors = ['research', 'plan', 'implement', 'verify'];
+                html += `
+                    <div class="timeline-row">
+                        <div class="timeline-label">${col.role.substring(0,8)}</div>
+                        <div class="timeline-bar-container">
+                            <div class="timeline-bar ${colors[i%4] || 'implement'}" style="width: ${width}%;"></div>
+                        </div>
+                        <div class="timeline-time">${duration}s</div>
+                    </div>
+                `;
+            });
+            timeline.innerHTML = html;
+        } else {
+            timeline.innerHTML = `
+                <div style="padding: 16px; color:var(--dim); font-family:var(--font-mono); font-size: 15px; display:flex; align-items:center; justify-content:center; height:100%;">
+                    <div>SYSTEM ● STANDBY</div>
+                </div>
+            `;
+        }
+        
+        const activeJob = state.cockpit.jobs.length > 0 ? state.cockpit.jobs[0] : null;
+        DOM.statusRun.innerText = activeJob ? `RUN #${activeJob.job_id.substring(0, 4)}` : `RUN #---`;
+        DOM.statusJobs.innerText = `JOBS ${state.cockpit.jobs.length.toString().padStart(2, '0')}`;
+        
+        let totalAgents = 0;
+        let totalTokens = 0;
+        state.cockpit.columns.forEach(col => {
+            totalAgents += col.agents.length;
+            col.agents.forEach(a => totalTokens += a.tokens || 0);
+        });
+        DOM.statusAgents.innerText = `AGENTS ${totalAgents.toString().padStart(2, '0')}`;
+        DOM.statusTokens.innerText = `TOKENS ${(totalTokens / 1000).toFixed(1)}K`;
+        
+        DOM.statusApprovals = document.getElementById('status-approvals');
+        if (DOM.statusApprovals) {
+            DOM.statusApprovals.innerText = `APPROVALS: ${state.cockpit.approvals.length}`;
+        }
+        
+        DOM.goalsList.innerHTML = state.cockpit.jobs.length ? state.cockpit.jobs.map(j => 
+            `<div class="gate-item">
+                <div style="font-size: 16px; font-weight: bold;">${j.goal}</div>
+                <div style="font-size: 12px; color:var(--cyan)">STATE: ${j.state.toUpperCase()}</div>
+                ${j.state === 'running' ? `<div class="gate-actions"><button onclick="cancelJob('${j.job_id}')" class="reject">CANCEL</button></div>` : ''}
+            </div>`
+        ).join('') : `
+            <div style="margin-bottom: 16px; text-align: left;">
+                <div style="font-size: 13px; color: var(--text-dim); font-weight: bold;">SYSTEM</div>
+                <div style="color: var(--dim); margin: 2px 0;">────────────────</div>
+                <div style="font-weight: bold; color: var(--text);">NO ACTIVE GOALS</div>
+            </div>`;
+
+        DOM.needsYou.innerHTML = state.cockpit.approvals.length ? state.cockpit.approvals.map(a => 
+            `<div class="gate-item" style="border-color: var(--amber); background: rgba(251, 184, 41, 0.05);">
+                <div style="color:var(--amber); font-weight:bold; font-size: 16px; margin-bottom: 8px;">! ACTION REQUIRED</div>
+                <div style="margin: 4px 0; font-size: 15px;">${a.question}</div>
+                <div style="font-size: 12px; color:var(--text-dim); margin-bottom: 4px;">SUBJECT: ${a.subject}</div>
+                <div class="gate-actions">
+                    <button class="approve" onclick="resolveApproval('${a.id}', 'approve')">APPROVE</button>
+                    <button class="reject" onclick="resolveApproval('${a.id}', 'reject')">REJECT</button>
+                </div>
+            </div>`
+        ).join('') : `
+            <div style="text-align: left; padding: 4px 0;">
+                <div style="font-size: 13px; color: var(--text-dim); font-weight: bold;">OPERATOR</div>
+                <div style="color: var(--dim); margin: 2px 0;">────────────────</div>
+                <div style="color: var(--cyan); font-weight: bold;">● ALL CLEAR</div>
+            </div>`;
+        
+        const needsOperatorHeader = document.querySelector('.needs-operator');
+        if (needsOperatorHeader) {
+            if (state.cockpit.approvals.length > 0) {
+                needsOperatorHeader.classList.add('active-gate');
+            } else {
+                needsOperatorHeader.classList.remove('active-gate');
+            }
+        }
+    }
+
+    window.cancelJob = async (id) => {
+        if(confirm("Cancel job?")) {
+            await apiControl('cancel', { job_id: id });
+            showToast("Cancellation sent", "info");
+        }
+    };
+    window.approveGate = async (id) => {
+        if(confirm("Approve this gate?")) {
+            await apiControl('approve', { id: id, note: "Approved from cockpit" });
+            showToast("Approved", "success");
+        }
+    };
+    window.rejectGate = async (id) => {
+        if(confirm("Reject this gate?")) {
+            await apiControl('reject', { id: id, note: "Rejected from cockpit" });
+            showToast("Rejected", "info");
+        }
+    };
+
+    // 8. TERMINALS & ANSI
+    // Basic ANSI stripper and formatter
+    function parseANSI(text) {
+        let out = text.replace(/\x1b\[[0-9;]*[HfA-D]/g, ''); // drop cursor movement
+        out = out.replace(/\x1b\]0;.*?\x07/g, ''); // OSC titles
+        out = out.replace(/\r(?!\n)/g, ''); // collapse bare CRs
+        
+        // Simple HTML wrap for SGR codes
+        let inSpan = false;
+        out = out.replace(/\x1b\[([0-9;]+)m/g, (match, codes) => {
+            const arr = codes.split(';');
+            let classes = [];
+            for (let c of arr) {
+                if (c === '0') return inSpan ? '</span>' : '';
+                classes.push('ansi-' + c);
+            }
+            const tag = `<span class="${classes.join(' ')}">`;
+            inSpan = true;
+            return tag;
+        });
+        if (inSpan) out += '</span>';
+        
+        // Escape HTML
+        out = out.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        // Fix up the spans we just escaped
+        out = out.replace(/&lt;span class=&quot;(.*?)&quot;&gt;/g, '<span class="$1">').replace(/&lt;\/span&gt;/g, '</span>');
+        return out;
+    }
+
+    async function loadTerminalListing() {
+        try {
+            const data = await apiGet('/api/terminals');
+            data.terminals.forEach(t => {
+                if (!state.terminals[t.id]) {
+                    state.terminals[t.id] = { meta: t, output: "", since: 0, loading: false };
+                } else {
+                    state.terminals[t.id].meta.state = t.state;
+                }
+            });
+            renderTerminalTabs();
+            if (state.activePane === 'terminals') renderTerminalsPane();
+            updateRailBadges();
+        } catch (e) {
+            console.error(e);
+        }
+    }
+
+    function renderTerminalTabs() {
+        DOM.termTabs.innerHTML = Object.values(state.terminals).map(t => 
+            `<button class="tab ${state.activeTerminal === t.meta.id ? 'active' : ''}" data-id="${t.meta.id}">
+                [ ${t.meta.id.substring(0,8).toUpperCase()} ${t.meta.state === 'running' ? '(RUN)' : '(EXIT)'} ]
+            </button>`
+        ).join('');
+        
+        DOM.termTabs.querySelectorAll('.tab').forEach(btn => {
+            btn.addEventListener('click', () => openTerminal(btn.getAttribute('data-id')));
+        });
+    }
+
+    function openTerminal(id) {
+        if (!state.terminals[id]) return;
+        state.activeTerminal = id;
+        renderTerminalTabs();
+        
+        // Render views
+        document.querySelectorAll('.terminal-view').forEach(v => v.classList.remove('active'));
+        let view = document.getElementById(`term-${id}`);
+        if (!view) {
+            view = document.createElement('div');
+            view.className = 'terminal-view active';
+            view.id = `term-${id}`;
+            DOM.termContainer.appendChild(view);
+        } else {
+            view.classList.add('active');
+        }
+        
+        pollTerminal(id);
+    }
+
+    async function pollTerminal(id) {
+        const term = state.terminals[id];
+        if (term.loading) return;
+        term.loading = true;
+        
+        try {
+            const res = await apiGet(`/api/terminal?id=${id}&since=${term.since}`);
+            if (res.command && term.since === 0) {
+                const view = document.getElementById(`term-${id}`);
+                const cmdLine = document.createElement('span');
+                cmdLine.className = 'term-cmd';
+                cmdLine.innerText = `> ${res.command.join(' ')}`;
+                view.appendChild(cmdLine);
+            }
+            
+            if (res.text) {
+                term.output += res.text;
+                const view = document.getElementById(`term-${id}`);
+                const chunk = document.createElement('span');
+                chunk.innerHTML = parseANSI(res.text);
+                view.appendChild(chunk);
+                
+                if (DOM.termFollow.checked && state.activeTerminal === id) {
+                    view.scrollTop = view.scrollHeight;
+                }
+            }
+            
+            term.since = res.next;
+            term.meta.state = res.state;
+            
+            if (res.state === 'running' && state.activeTerminal === id) {
+                setTimeout(() => pollTerminal(id), 400);
+            }
+        } catch(e) {
+            console.error(e);
+        } finally {
+            term.loading = false;
+        }
+    }
+
+    // 9. FILE VIEWER & SYNTAX
+    function tokenize(code, lang) {
+        // Honest, minimal tokenizer
+        code = code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        
+        const keywords = "def|class|import|from|return|if|else|elif|for|in|while|try|except|with|as|pass|break|continue|yield|and|or|not|is|lambda|None|True|False|const|let|var|function|await|async|null|true|false|new|this|typeof|export|default";
+        const types = "Dict|Any|Optional|List|Tuple|Union|Callable|Set|Mapping|Sequence|str|int|bool|float|bytes";
+        const builtins = "print|dict|list|set|len|sum|os|sys|__init__|__enter__|__exit__|self|super|Math|console|document|window";
+        
+        const tokenRegex = new RegExp(`(#.*?$|\\\\/\\\\/.*?$|".*?"|'.*?'|\\\\b(?:${keywords})\\\\b|\\\\b(?:${types})\\\\b|\\\\b(?:${builtins})\\\\b|\\\\b[A-Za-z_][A-Za-z0-9_]*(?=\\\\()|\\\\b\\\\d+\\\\b)`, 'gm');
+        
+        code = code.replace(tokenRegex, (match) => {
+            if (match.startsWith('#') || match.startsWith('//')) {
+                return `<span class="token-comment">${match}</span>`;
+            }
+            if (match.startsWith('"') || match.startsWith("'")) {
+                return `<span class="token-string">${match}</span>`;
+            }
+            if (/^\\d+$/.test(match)) {
+                return `<span class="token-number">${match}</span>`;
+            }
+            if (new RegExp(`^(${keywords})$`).test(match)) {
+                return `<span class="token-keyword">${match}</span>`;
+            }
+            if (new RegExp(`^(${types})$`).test(match)) {
+                return `<span class="token-type">${match}</span>`;
+            }
+            if (new RegExp(`^(${builtins})$`).test(match)) {
+                return `<span class="token-builtin">${match}</span>`;
+            }
+            return `<span class="token-function">${match}</span>`;
+        });
+        
+        return code;
+    }
+
+    // 10. EXPLORER (MOCK / API)
+    // Basic root fetching
+    async function loadExplorerRoots() {
+        try {
+            const data = await apiGet('/api/explorer?root=project&path=&hidden=0');
+            DOM.rootPicker.innerHTML = data.roots.map(r => `<option value="${r.id}">${r.label}</option>`).join('');
+            renderExplorerTree(data.entries, DOM.explorerTree, data.root, "");
+        } catch (e) {
+            DOM.explorerTree.innerHTML = '<div class="empty-state">NO SIGNAL</div>';
+        }
+    }
+
+    function renderExplorerTree(entries, container, root, basePath) {
+        container.innerHTML = '';
+        entries.forEach(e => {
+            const item = document.createElement('div');
+            item.className = 'tree-item';
+            let icon = e.kind === 'dir' ? '📁' : '📄';
+            let gitClass = e.git ? `git-${e.git}` : '';
+            item.innerHTML = `<span class="tree-icon ${gitClass}">[${e.kind === 'dir' ? '+' : ' '}]</span> <span class="${gitClass}">${e.name}</span>`;
+            
+            if (e.kind === 'dir') {
+                const childrenContainer = document.createElement('div');
+                childrenContainer.className = 'tree-children hidden';
+                item.appendChild(childrenContainer);
+                
+                item.addEventListener('click', async (ev) => {
+                    ev.stopPropagation();
+                    if (childrenContainer.classList.contains('hidden')) {
+                        childrenContainer.classList.remove('hidden');
+                        if (childrenContainer.innerHTML === '') {
+                            const data = await apiGet(`/api/explorer?root=${root}&path=${e.path}&hidden=0`);
+                            renderExplorerTree(data.entries, childrenContainer, root, e.path);
+                        }
+                    } else {
+                        childrenContainer.classList.add('hidden');
+                    }
+                });
+            } else {
+                item.addEventListener('click', (ev) => {
+                    ev.stopPropagation();
+                    openFile(root, e.path);
+                });
+            }
+            container.appendChild(item);
+        });
+    }
+
+    async function openFile(root, path) {
+        try {
+            const data = await apiGet(`/api/file?root=${root}&path=${path}`);
+            const tabId = 'file-' + btoa(path).replace(/[^a-z0-9]/gi, '');
+            
+            if (!document.querySelector(`[data-tab-id="${tabId}"]`)) {
+                // Create tab
+                const tab = document.createElement('button');
+                tab.className = 'tab';
+                tab.setAttribute('data-tab-id', tabId);
+                tab.innerHTML = `${data.name} <span class="tab-close">x</span>`;
+                DOM.mainTabs.appendChild(tab);
+
+                // Create content
+                const content = document.createElement('div');
+                content.className = 'tab-content file-viewer';
+                content.id = `pane-${tabId}`;
+                
+                const lines = data.text.split('\n');
+                let html = `<div class="file-breadcrumbs">
+                    <span>${data.path}</span>
+                    <span>INFO: ${data.language} | ${data.size} bytes | ${data.lines} lines</span>
+                </div>`;
+                
+                html += lines.map((l, i) => `<div class="code-line"><span class="line-num">${i+1}</span><span class="code-text">${tokenize(l, data.language)}</span></div>`).join('');
+                content.innerHTML = html;
+                
+                document.querySelector('.editor-area').appendChild(content);
+
+                tab.addEventListener('click', () => switchTab(tabId));
+                tab.querySelector('.tab-close').addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    tab.remove();
+                    content.remove();
+                    switchTab('pipeline');
+                });
+            }
+            switchTab(tabId);
+            DOM.statusFile.innerText = path;
+        } catch (e) {
+            showToast("Failed to read file", "error");
+        }
+    }
+
+    function switchTab(tabId) {
+        document.querySelectorAll('.tabs-header .tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.editor-area .tab-content').forEach(c => c.classList.remove('active'));
+        
+        const tab = document.querySelector(`[data-tab-id="${tabId}"]`);
+        const pane = document.getElementById(`pane-${tabId}`);
+        if (tab && pane) {
+            tab.classList.add('active');
+            pane.classList.add('active');
+        }
+    }
+    DOM.mainTabs.querySelector('[data-tab-id="pipeline"]').addEventListener('click', () => switchTab('pipeline'));
+
+    // 10a. THE EVIDENCE BESIDE THE CHOICE (Roadmap 8.3)
+    // `--stats` already knows what each agent, model and role has actually cost and how
+    // often it passed. Putting the number next to the dropdown is the whole of what makes
+    // picking one an evidence-based act rather than a preference.
+    async function loadEvidence() {
+        try {
+            state.evidence = await apiGet('/api/stats');
+        } catch (e) {
+            state.evidence = null;
+        }
+        renderTeamEvidence();
+    }
+
+    function evidenceLine(row) {
+        if (!row || !row.runs) return '<span class="ev-thin">no runs recorded yet</span>';
+        const tokens = row.tokens_per_run
+            ? ' &middot; ' + (row.tokens_per_run / 1000).toFixed(1) + 'k tokens/run' : '';
+        const runs = `${row.runs} run${row.runs === 1 ? '' : 's'}`;
+        // `pass_rate` is a percentage or null, and null means "never judged" rather than
+        // zero - reporting a role with no verdict as 0% would be inventing a finding.
+        if (row.pass_rate === null || row.pass_rate === undefined) {
+            return `<span class="ev-thin">no verdict over ${runs}${tokens}</span>`;
+        }
+        const cls = row.thin ? 'ev-thin' : (row.pass_rate >= 60 ? 'ev-good' : 'ev-poor');
+        const thin = row.thin ? ' (thin evidence)' : '';
+        return `<span class="${cls}">${row.pass_rate}% pass over ${runs}${tokens}${thin}</span>`;
+    }
+
+    function renderTeamEvidence() {
+        const nodes = document.querySelectorAll('[data-evidence-role]');
+        if (!nodes.length) return;
+        const ev = state.evidence;
+        nodes.forEach(node => {
+            if (!ev) { node.innerHTML = '<span class="ev-thin">evidence unavailable</span>'; return; }
+            const role = node.getAttribute('data-evidence-role');
+            const agent = node.getAttribute('data-evidence-agent');
+            const model = node.getAttribute('data-evidence-model');
+            const row = (ev.by_model || {})[agent + '/' + model]
+                || (ev.by_agent || {})[agent]
+                || (ev.by_role || {})[role];
+            node.innerHTML = evidenceLine(row);
+        });
+    }
+
+    // 10b. THE ACTIVITY RAIL AND THE FOUR SIDEBAR PANES
+    // The rail is the only thing that decides which pane the sidebar shows, and clicking the
+    // pane you are already on collapses the sidebar - the same gesture an editor uses, and
+    // the reason `Ctrl B` and the rail cannot disagree about what "hidden" means.
+    const PANE_TITLES = { explorer: 'EXPLORER', team: 'TEAM', board: 'BOARD', terminals: 'TERMINALS' };
+
+    function switchPane(name) {
+        if (!PANE_TITLES[name]) return;
+        state.activePane = name;
+        document.body.classList.remove('sidebar-hidden');
+        document.querySelectorAll('.rail-btn').forEach(b =>
+            b.classList.toggle('active', b.getAttribute('data-pane') === name));
+        document.querySelectorAll('.sidebar-pane').forEach(pane =>
+            pane.classList.toggle('active', pane.id === 'side-' + name));
+        if (DOM.sidebarTitle) DOM.sidebarTitle.innerText = PANE_TITLES[name];
+        if (DOM.explorerActions) DOM.explorerActions.style.display = name === 'explorer' ? '' : 'none';
+        remember('cockpit-pane', name);
+        if (name === 'team') renderTeamPane();
+        if (name === 'board') loadBoard();
+        if (name === 'terminals') renderTerminalsPane();
+    }
+
+    document.querySelectorAll('.rail-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const name = btn.getAttribute('data-pane');
+            const hidden = document.body.classList.contains('sidebar-hidden');
+            if (state.activePane === name && !hidden) {
+                document.body.classList.add('sidebar-hidden');
+            } else {
+                switchPane(name);
+            }
+        });
+    });
+
+    function toggleSidebar() {
+        if (document.body.classList.contains('sidebar-hidden')) {
+            switchPane(state.activePane);
+        } else {
+            document.body.classList.add('sidebar-hidden');
+        }
+    }
+
+    // -- TEAM PANE. The second of the page's two writes, and a deliberately smaller editor
+    // than `design.html`: who fills each role, and the two settings that change what a
+    // verdict means. Composing a whole team is still the design surface's job.
+    function cloneTeam(team) {
+        return JSON.parse(JSON.stringify(team || {}));
+    }
+
+    function currentTeamDraft() {
+        if (!state.teamDraft && state.cockpit && state.cockpit.team) {
+            state.teamDraft = cloneTeam(state.cockpit.team);
+        }
+        return state.teamDraft;
+    }
+
+    function modelIdOf(agent) {
+        const model = agent ? agent.model : null;
+        if (Array.isArray(model)) return model.length ? model[0] : '';
+        return model || '';
+    }
+
+    function renderTeamPane() {
+        if (!DOM.teamPane) return;
+        const team = currentTeamDraft();
+        if (!team || !Array.isArray(team.agents)) {
+            DOM.teamPane.innerHTML = '<div class="empty-state">NO TEAM</div>';
+            return;
+        }
+        const catalog = (state.cockpit && state.cockpit.catalog) || { models: {}, roles: {}, consensus_policies: [] };
+        const providers = Object.keys(catalog.models || {});
+        const problems = state.teamProblems.length ? state.teamProblems : ((state.cockpit && state.cockpit.problems) || []);
+
+        let html = '';
+        team.agents.forEach((agent, index) => {
+            const models = (catalog.models || {})[agent.agent] || [];
+            html += `
+                <div class="team-role">
+                    <div class="team-role-name">${(agent.role || '?').toUpperCase()}</div>
+                    <div class="team-role-note">${(catalog.roles || {})[agent.role] || ''}</div>
+                    <select data-team-field="agent" data-team-index="${index}">
+                        ${providers.map(prov =>
+                            `<option value="${prov}" ${prov === agent.agent ? 'selected' : ''}>${prov}</option>`).join('')}
+                    </select>
+                    <select data-team-field="model" data-team-index="${index}">
+                        ${models.map(m =>
+                            `<option value="${m.id}" ${m.id === modelIdOf(agent) ? 'selected' : ''}>${m.name}</option>`).join('')}
+                    </select>
+                    <div class="team-evidence" data-evidence-role="${agent.role || ''}" data-evidence-agent="${agent.agent || ''}" data-evidence-model="${modelIdOf(agent)}"></div>
+                </div>`;
+        });
+
+        html += `
+            <div class="team-role">
+                <div class="team-role-name">VERDICT</div>
+                <div class="team-role-note">how several verifiers are resolved, and how often repair may try</div>
+                <select data-team-field="consensus" data-team-index="-1">
+                    ${(catalog.consensus_policies || []).map(policy =>
+                        `<option value="${policy}" ${policy === team.consensus ? 'selected' : ''}>consensus: ${policy}</option>`).join('')}
+                </select>
+                <input type="number" min="0" max="10" data-team-field="repair" data-team-index="-1"
+                       value="${team.max_repair_attempts === undefined ? 2 : team.max_repair_attempts}" title="max repair attempts">
+            </div>`;
+
+        html += problems.map(pr => `<div class="team-problem">! ${pr}</div>`).join('');
+        html += `
+            <div class="team-actions">
+                <button id="team-save">SAVE</button>
+                <button id="team-revert">REVERT</button>
+            </div>`;
+
+        DOM.teamPane.innerHTML = html;
+
+        DOM.teamPane.querySelectorAll('[data-team-field]').forEach(el => {
+            el.addEventListener('change', () => {
+                const field = el.getAttribute('data-team-field');
+                const index = parseInt(el.getAttribute('data-team-index'), 10);
+                if (field === 'consensus') { team.consensus = el.value; return; }
+                if (field === 'repair') {
+                    team.max_repair_attempts = Math.max(0, parseInt(el.value, 10) || 0);
+                    return;
+                }
+                const agent = team.agents[index];
+                if (!agent) return;
+                if (field === 'agent') {
+                    agent.agent = el.value;
+                    const first = ((catalog.models || {})[el.value] || [])[0];
+                    agent.model = first ? first.id : '';
+                    renderTeamPane();
+                } else if (field === 'model') {
+                    agent.model = el.value;
+                    renderTeamEvidence();
+                }
+            });
+        });
+
+        const save = document.getElementById('team-save');
+        if (save) save.addEventListener('click', saveTeam);
+        const revert = document.getElementById('team-revert');
+        if (revert) revert.addEventListener('click', () => {
+            state.teamDraft = cloneTeam(state.cockpit && state.cockpit.team);
+            state.teamProblems = [];
+            renderTeamPane();
+        });
+        renderTeamEvidence();
+    }
+
+    async function saveTeam() {
+        const team = currentTeamDraft();
+        if (!team) return;
+        try {
+            const result = await apiSaveTeam({
+                agents: team.agents,
+                consensus: team.consensus,
+                max_repair_attempts: team.max_repair_attempts
+            });
+            if (result.ok) {
+                state.teamProblems = [];
+                showToast('Team saved', 'success');
+                fetchCockpit();
+            } else {
+                state.teamProblems = (result.problems && result.problems.length)
+                    ? result.problems : [result.error || 'the team was not saved'];
+                renderTeamPane();
+            }
+        } catch (e) {
+            state.teamProblems = ['could not reach the orchestrator'];
+            renderTeamPane();
+        }
+    }
+
+    // -- BOARD PANE. The board projection, unchanged, in the sidebar: every card in its
+    // derived column, and the one act the daemon already exposes a verb for.
+    async function loadBoard() {
+        try {
+            state.board = await apiGet('/api/board');
+        } catch (e) {
+            state.board = null;
+        }
+        renderBoardPane();
+    }
+
+    function renderBoardPane() {
+        if (!DOM.boardPane) return;
+        const board = state.board;
+        if (!board || !board.columns) {
+            DOM.boardPane.innerHTML = '<div class="empty-state">NO SIGNAL</div>';
+            return;
+        }
+        const order = board.order || Object.keys(board.columns);
+        let html = '';
+        order.forEach(name => {
+            const cards = board.columns[name] || [];
+            const slug = 'col-' + String(name).toLowerCase().replace(/[^a-z]+/g, '-');
+            html += `<div class="board-column-name">${name.toUpperCase()} (${cards.length})</div>`;
+            if (!cards.length) {
+                html += '<div class="card-sub" style="padding:2px 4px; color:var(--dim);">empty</div>';
+                return;
+            }
+            cards.forEach(card => {
+                const id = card.task_id || card.run_id || card.id || '';
+                const ready = String(name).toLowerCase().indexOf('ready') >= 0;
+                html += `
+                    <div class="board-card ${slug}">
+                        <div class="card-title">${card.title || card.task || id}</div>
+                        <div class="card-sub">${id} &middot; ${String(card.state || card.status || '').toUpperCase()}</div>
+                        ${ready ? `<button data-deliver="${id}">DELIVER</button>` : ''}
+                    </div>`;
+            });
+        });
+        DOM.boardPane.innerHTML = html;
+        DOM.boardPane.querySelectorAll('[data-deliver]').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const card = btn.getAttribute('data-deliver');
+                if (!confirm('Deliver ' + card + '?')) return;
+                try {
+                    const result = await apiControl('deliver', { card: card });
+                    showToast(result.ok ? 'Delivered' : (result.error || 'Delivery refused'),
+                              result.ok ? 'success' : 'error');
+                } catch (e) {
+                    showToast('Delivery failed', 'error');
+                }
+                loadBoard();
+            });
+        });
+    }
+
+    // -- TERMINALS PANE. The same registry the bottom panel tabs come from, listed rather
+    // than tabbed, so an agent that finished an hour ago is still one click away.
+    function renderTerminalsPane() {
+        if (!DOM.terminalsList) return;
+        const entries = Object.values(state.terminals);
+        if (!entries.length) {
+            DOM.terminalsList.innerHTML = '<div class="empty-state">NO AGENTS YET</div>';
+            return;
+        }
+        DOM.terminalsList.innerHTML = entries.map(t => `
+            <div class="terminal-entry" data-terminal="${t.meta.id}">
+                <span>${t.meta.label || t.meta.id}</span>
+                <span class="term-state">${String(t.meta.state || '').toUpperCase()}</span>
+            </div>`).join('');
+        DOM.terminalsList.querySelectorAll('[data-terminal]').forEach(el => {
+            el.addEventListener('click', () => {
+                document.body.classList.remove('terminals-hidden');
+                openTerminal(el.getAttribute('data-terminal'));
+            });
+        });
+    }
+
+    // 11. SSE & POLLING
+    function setupStream() {
+        const evtSource = new EventSource(`/api/stream?since=-1&token=${TOKEN}`);
+        
+        evtSource.onopen = () => {
+            DOM.statusStream.innerHTML = `STREAM <span class="heartbeat" style="color:var(--green)">●</span> CONNECTED`;
+            DOM.statusStream.style.color = 'var(--text)';
+        };
+        
+        evtSource.onerror = () => {
+            DOM.statusStream.innerHTML = `STREAM <span style="color:var(--red)">●</span> DROPPED (POLLING...)`;
+            DOM.statusStream.style.color = 'var(--text)';
+        };
+
+        evtSource.onmessage = (e) => {
+            fetchCockpit();
+        };
+
+        evtSource.addEventListener('activity', (e) => {
+            const data = JSON.parse(e.data);
+            if (data.task) DOM.statusRun.innerText = `RUN: ${data.task.substring(0, 20).toUpperCase()}`;
+        });
+        
+        evtSource.addEventListener('orchestrator', (e) => {
+            const data = JSON.parse(e.data);
+            const seqStr = String(data.sequence || '0').padStart(3, '0');
+            const evtType = data.event.toUpperCase();
+            
+            let catStr = 'SYS';
+            if (evtType.includes('AGENT')) catStr = 'AGENT';
+            else if (evtType.includes('ERROR') || evtType.includes('FAIL')) catStr = 'ERROR';
+            else if (evtType.includes('WARN')) catStr = 'WARN';
+            else if (evtType.includes('FILE')) catStr = 'FILE';
+            else if (evtType.includes('RUN')) catStr = 'RUN';
+            
+            appendLog(seqStr, catStr, evtType, data.payload);
+            
+            if (['agent_started', 'agent_result', 'run_started', 'run_finished'].includes(data.event)) {
+                fetchCockpit();
+                loadTerminalListing();
+            }
+        });
+    }
+
+    function appendLog(seqStr = '---', catStr = 'SYS', eventStr = 'LOG', payload = null) {
+        const line = document.createElement('div');
+        line.className = 'log-line';
+        line.style.display = 'flex';
+        line.style.gap = '12px';
+        line.style.alignItems = 'center';
+        
+        let payloadHTML = payload ? `<span style="color:var(--text-dim); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${JSON.stringify(payload)}</span>` : '';
+        
+        const catClass = `cat-${catStr.toLowerCase()}`;
+        line.innerHTML = `
+            <span class="log-time" style="flex: 0 0 65px;">${new Date().toISOString().substring(11, 19)}</span>
+            <span style="flex: 0 0 24px; color: var(--dim);">${seqStr}</span>
+            <span class="${catClass}" style="flex: 0 0 60px;">${catStr.substring(0,8)}</span>
+            <span style="flex: 0 0 100px; color: var(--text);">${eventStr.replace(catStr + '_', '')}</span>
+            ${payloadHTML}
+        `;
+        DOM.activityLog.appendChild(line);
+        DOM.activityLog.scrollTop = DOM.activityLog.scrollHeight;
+    }
+
+    async function fetchCockpit() {
+        try {
+            const data = await apiGet('/api/cockpit');
+            state.cockpit = data;
+            renderPipeline();
+            renderInspector();
+            updateRailBadges();
+            if (state.activePane === 'team') renderTeamPane();
+            if (state.activePane === 'board') renderBoardPane();
+        } catch (e) {
+            console.error("Failed to fetch cockpit", e);
+        }
+    }
+
+    // 12. INITIALIZATION & KEYBOARD
+    DOM.startBtn.addEventListener('click', async () => {
+        const goal = DOM.goalInput.value.trim();
+        if (!goal) return;
+        
+        // Command Execution Transitions
+        DOM.goalInput.disabled = true;
+        DOM.startBtn.disabled = true;
+        DOM.startBtn.innerText = "ORCHESTRATING...";
+        
+        try {
+            await apiControl('start', { goal: goal, parallel: DOM.parallelSelect.value });
+            DOM.goalInput.value = '';
+            showToast("Goal Dispatched", "success");
+            
+            // Visual transition for pipeline
+            if (!prefersReducedMotion && window.gsap) {
+                gsap.to('.pipeline-choreography', { opacity: 0.2, yoyo: true, repeat: 1, duration: 0.2 });
+            }
+        } catch(e) {
+            showToast("Failed to dispatch goal", "error");
+        } finally {
+            DOM.goalInput.disabled = false;
+            DOM.startBtn.disabled = false;
+            DOM.startBtn.innerText = "START";
+        }
+    });
+
+    // Uptime Telemetry
+    let startTime = Date.now();
+    setInterval(() => {
+        const diff = Math.floor((Date.now() - startTime) / 1000);
+        const h = String(Math.floor(diff / 3600)).padStart(2, '0');
+        const m = String(Math.floor((diff % 3600) / 60)).padStart(2, '0');
+        const s = String(diff % 60).padStart(2, '0');
+        const uptimeEl = document.getElementById('status-uptime');
+        if (uptimeEl) uptimeEl.innerText = `UPTIME ${h}:${m}:${s}`;
+    }, 1000);
+
+    // Command Palette. Two modes in one box, chosen by the first character: a leading ">"
+    // is a command, and anything else is a file-name search over `/api/find` - which is why
+    // `Ctrl P` is not a second widget, only this one opened with the prefix already gone.
+    const paletteCommands = [
+        { label: '> Run goal', action: () => { DOM.goalInput.focus(); } },
+        { label: '> Show explorer', action: () => switchPane('explorer') },
+        { label: '> Show team', action: () => switchPane('team') },
+        { label: '> Show board', action: () => switchPane('board') },
+        { label: '> Show terminals', action: () => switchPane('terminals') },
+        { label: '> Toggle sidebar', action: toggleSidebar },
+        { label: '> Toggle inspector', action: () => document.body.classList.toggle('inspector-hidden') },
+        { label: '> Toggle terminal panel', action: () => document.body.classList.toggle('terminals-hidden') },
+        { label: '> Change theme', action: () => { DOM.themeSelect.focus(); } }
+    ];
+
+    let paletteMatches = [];
+    let paletteCursor = 0;
+    let paletteToken = 0;
+
+    function paletteOverlay() { return document.getElementById('command-palette-overlay'); }
+
+    function paintPalette() {
+        const resList = document.getElementById('palette-results');
+        if (!resList) return;
+        if (!paletteMatches.length) {
+            resList.innerHTML = '<div class="palette-item" style="color:var(--dim);">no matches</div>';
+            return;
+        }
+        resList.innerHTML = paletteMatches.map((m, idx) => `
+            <div class="palette-item ${idx === paletteCursor ? 'selected' : ''}" data-idx="${idx}">
+                ${m.label}${m.sub ? `<div class="palette-sub">${m.sub}</div>` : ''}
+            </div>`).join('');
+        resList.querySelectorAll('.palette-item[data-idx]').forEach(el => {
+            el.addEventListener('click', () => runPalette(parseInt(el.getAttribute('data-idx'), 10)));
+        });
+    }
+
+    function runPalette(index) {
+        const chosen = paletteMatches[index];
+        closePalette();
+        if (chosen && chosen.action) chosen.action();
+    }
+
+    async function renderPaletteResults(query) {
+        paletteCursor = 0;
+        const trimmed = (query || '').trim();
+        if (trimmed.indexOf('>') === 0 || trimmed === '') {
+            const needle = trimmed.replace(/^>\s*/, '').toLowerCase();
+            paletteMatches = paletteCommands
+                .filter(c => c.label.toLowerCase().includes(needle))
+                .map(c => ({ label: c.label, action: c.action }));
+            paintPalette();
+            return;
+        }
+        const mine = ++paletteToken;
+        try {
+            const root = DOM.rootPicker && DOM.rootPicker.value ? DOM.rootPicker.value : 'project';
+            const found = await apiGet(
+                '/api/find?root=' + encodeURIComponent(root) + '&q=' + encodeURIComponent(trimmed));
+            if (mine !== paletteToken) return;  // a later keystroke already answered
+            paletteMatches = (found.matches || found.entries || []).map(entry => {
+                const path = entry.path || entry;
+                const name = entry.name || String(path).split('/').pop();
+                return { label: name, sub: path, action: () => openFile(root, path) };
+            });
+        } catch (e) {
+            if (mine !== paletteToken) return;
+            paletteMatches = [];
+        }
+        paintPalette();
+    }
+
+    function openPalette(prefix) {
+        const overlay = paletteOverlay();
+        if (!overlay) return;
+        overlay.style.display = 'flex';
+        const input = document.getElementById('palette-input');
+        if (input) {
+            input.value = prefix || '';
+            input.focus();
+            renderPaletteResults(input.value);
+        }
+    }
+
+    function closePalette() {
+        const overlay = paletteOverlay();
+        if (overlay) overlay.style.display = 'none';
+    }
+
+    const paletteInput = document.getElementById('palette-input');
+    if (paletteInput) {
+        paletteInput.addEventListener('input', (e) => renderPaletteResults(e.target.value));
+        paletteInput.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                paletteCursor = Math.min(paletteCursor + 1, Math.max(paletteMatches.length - 1, 0));
+                paintPalette();
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                paletteCursor = Math.max(paletteCursor - 1, 0);
+                paintPalette();
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+                runPalette(paletteCursor);
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                closePalette();
+            }
+        });
+    }
+
+    // The keyboard map the status bar advertises, and nothing it does not.
+    document.addEventListener('keydown', (e) => {
+        const mod = e.ctrlKey || e.metaKey;
+        const typing = document.activeElement
+            && ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName);
+
+        if (mod && e.key.toLowerCase() === 'k') {          // Ctrl K - the palette
+            e.preventDefault();
+            openPalette('> ');
+            return;
+        }
+        if (mod && e.key.toLowerCase() === 'p') {          // Ctrl P - go to file
+            e.preventDefault();
+            openPalette('');
+            return;
+        }
+        if (mod && e.key.toLowerCase() === 'b') {          // Ctrl B - the sidebar
+            e.preventDefault();
+            toggleSidebar();
+            return;
+        }
+        if (mod && e.key.toLowerCase() === 'i') {          // Ctrl I - the inspector
+            e.preventDefault();
+            document.body.classList.toggle('inspector-hidden');
+            remember('cockpit-inspector-hidden',
+                     document.body.classList.contains('inspector-hidden') ? '1' : '0');
+            return;
+        }
+        if (mod && e.key === '`') {                        // Ctrl ` - the terminal panel
+            e.preventDefault();
+            document.body.classList.toggle('terminals-hidden');
+            remember('cockpit-terminals-hidden',
+                     document.body.classList.contains('terminals-hidden') ? '1' : '0');
+            return;
+        }
+        if (mod && e.key === 'Enter') {                    // Ctrl Enter - start the goal
+            if (document.activeElement === DOM.goalInput) {
+                e.preventDefault();
+                DOM.startBtn.click();
+            }
+            return;
+        }
+        if (e.key === 'Escape') {
+            closePalette();
+            if (document.activeElement) document.activeElement.blur();
+            return;
+        }
+        if (e.key === 'f' && !typing) {                    // f - follow the live terminal
+            DOM.termFollow.checked = !DOM.termFollow.checked;
+        }
+    });
+
+    // Handle Splitters
+    let isResizing = false;
+    let currentSplitter = null;
+    document.querySelectorAll('.splitter').forEach(s => {
+        s.addEventListener('mousedown', (e) => { isResizing = true; currentSplitter = s.id; e.preventDefault(); });
+    });
+    document.querySelectorAll('.splitter-horizontal').forEach(s => {
+        s.addEventListener('mousedown', (e) => { isResizing = true; currentSplitter = s.id; e.preventDefault(); });
+    });
+    const GEOMETRY = {
+        'splitter-sidebar': '--sidebar-width',
+        'splitter-inspector': '--inspector-width',
+        'splitter-terminals': '--terminals-height'
+    };
+    function setGeometry(name, pixels) {
+        const bounded = Math.max(120, Math.min(pixels, 900));
+        document.documentElement.style.setProperty(GEOMETRY[name], `${bounded}px`);
+        remember('cockpit-' + name, bounded);
+    }
+    document.addEventListener('mousemove', (e) => {
+        if (!isResizing) return;
+        if (currentSplitter === 'splitter-sidebar') {
+            setGeometry(currentSplitter, e.clientX - 40);
+        } else if (currentSplitter === 'splitter-inspector') {
+            setGeometry(currentSplitter, document.body.clientWidth - e.clientX);
+        } else if (currentSplitter === 'splitter-terminals') {
+            setGeometry(currentSplitter, document.body.clientHeight - e.clientY);
+        }
+    });
+    document.addEventListener('mouseup', () => { isResizing = false; currentSplitter = null; });
+
+    function restoreGeometry() {
+        Object.keys(GEOMETRY).forEach(name => {
+            const stored = parseInt(recall('cockpit-' + name, ''), 10);
+            if (stored) document.documentElement.style.setProperty(GEOMETRY[name], `${stored}px`);
+        });
+        if (recall('cockpit-inspector-hidden', '0') === '1') {
+            document.body.classList.add('inspector-hidden');
+        }
+        if (recall('cockpit-terminals-hidden', '0') === '1') {
+            document.body.classList.add('terminals-hidden');
+        }
+        switchPane(recall('cockpit-pane', 'explorer'));
+    }
+
+    // A badge on the rail for the one thing that is waiting on a person.
+    function updateRailBadges() {
+        const board = document.querySelector('.rail-btn[data-pane="board"]');
+        if (!board) return;
+        const waiting = (state.cockpit && state.cockpit.needs_you ? state.cockpit.needs_you.length : 0)
+            + (state.cockpit && state.cockpit.approvals ? state.cockpit.approvals.length : 0);
+        board.innerHTML = '[B]' + (waiting ? `<span class="rail-badge">${waiting}</span>` : '');
+    }
+
+    // BOOT SEQUENCE
+    async function boot() {
+        // Theme initialization
+        const savedTheme = localStorage.getItem('cockpit-theme') || 'theme-srcery';
+        document.body.classList.add(savedTheme);
+        if (DOM.themeSelect) {
+            DOM.themeSelect.value = savedTheme;
+            DOM.themeSelect.addEventListener('change', (e) => {
+                document.body.classList.remove('theme-srcery', 'theme-miasma', 'theme-tender', 'theme-jellybeans', 'theme-moonfly');
+                document.body.classList.add(e.target.value);
+                localStorage.setItem('cockpit-theme', e.target.value);
+            });
+        }
+
+        // Inspector Back Button
+        const btnBack = document.getElementById('btn-inspector-back');
+        if (btnBack) {
+            btnBack.addEventListener('click', () => {
+                document.getElementById('inspector-agent').style.display = 'none';
+                document.getElementById('inspector-global').style.display = 'block';
+                DOM.pipelineBoard.classList.remove('has-focus');
+                document.querySelectorAll('.agent-card').forEach(c => c.classList.remove('selected-agent'));
+            });
+        }
+
+        const bootText = document.getElementById('boot-text');
+        if (bootText && !prefersReducedMotion) {
+            const steps = [
+                "ORCHESTRATOR\n────────────────────────────\n",
+                "INITIALIZING DAEMON ........ ",
+                "OK\nLOADING PROJECT ............ ",
+                "OK\nCONNECTING STREAM .......... ",
+                "OK\nVERIFYING PIPELINE ......... ",
+                "OK\n\nREADY."
+            ];
+            let current = "";
+            for (let i = 0; i < steps.length; i++) {
+                current += steps[i];
+                bootText.innerText = current;
+                await new Promise(r => setTimeout(r, i === 0 ? 100 : 80));
+            }
+            await new Promise(r => setTimeout(r, 100));
+        }
+
+        restoreGeometry();
+
+        // Fetch initial data
+        try { await fetchCockpit(); } catch(e){}
+        try { await loadExplorerRoots(); } catch(e){}
+        try { await loadTerminalListing(); } catch(e){}
+        try { await loadEvidence(); } catch(e){}
+        
+        setupStream();
+        
+        // Boot Animation
+        if (!prefersReducedMotion && window.gsap) {
+            const tl = gsap.timeline();
+            tl.to('.boot-overlay', { opacity: 0, duration: 0.3, onComplete: () => {
+                document.body.classList.remove('booting');
+            }})
+              .from('.app-container', { opacity: 0, duration: 0.1 })
+              .from('.panel-header', { opacity: 0, y: -10, stagger: 0.1, duration: 0.3 })
+              .from('.pipeline-col', { opacity: 0, x: -10, stagger: 0.1, duration: 0.3 }, "-=0.2");
+        } else {
+            document.body.classList.remove('booting');
+        }
+        
+        // Slow poll fallback
+        setInterval(fetchCockpit, 5000);
+    }
+
+    // Start
+    boot();
+})();
+
+    </script>
+</body>
+</html>

@@ -1,0 +1,729 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="orchestrator-token" content="__ORCHESTRATOR_TOKEN__">
+<title>The Office — AI Orchestrator</title>
+<style>
+  :root {
+    --bg: #10131a;
+    --panel: #171b24;
+    --panel-2: #1e2430;
+    --line: #2a3243;
+    --ink: #e6e9f0;
+    --dim: #8b93a7;
+    --accent: #6ea8fe;
+    --ok: #4ade80;
+    --warn: #fbbf24;
+    --bad: #f87171;
+    --person: #c084fc;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%;
+    background: var(--bg); color: var(--ink);
+    font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  #app { display: grid; grid-template-rows: auto 1fr; height: 100%; }
+
+  header {
+    display: flex; align-items: center; gap: 16px;
+    padding: 12px 20px; border-bottom: 1px solid var(--line); background: var(--panel);
+  }
+  header h1 { font-size: 15px; margin: 0; font-weight: 650; letter-spacing: .2px; }
+  header .task { color: var(--dim); font-size: 13px; flex: 1;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pill {
+    font-size: 12px; padding: 3px 10px; border-radius: 999px;
+    border: 1px solid var(--line); background: var(--panel-2); color: var(--dim);
+  }
+  .pill.live { color: var(--ok); border-color: #24603c; }
+  .pill.needs { color: var(--warn); border-color: #6b4d12; }
+
+  main { display: grid; grid-template-columns: 1fr 340px; min-height: 0; }
+  #stage { position: relative; min-width: 0; }
+  canvas { display: block; width: 100%; height: 100%; }
+
+  aside {
+    border-left: 1px solid var(--line); background: var(--panel);
+    display: grid; grid-template-rows: auto 1fr; min-height: 0;
+  }
+  .section { padding: 14px 16px; border-bottom: 1px solid var(--line); }
+  .section h2 {
+    margin: 0 0 10px; font-size: 11px; letter-spacing: .12em;
+    text-transform: uppercase; color: var(--dim); font-weight: 600;
+  }
+  .cols { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .col {
+    background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: 8px; padding: 8px 10px;
+  }
+  .col .n { font-size: 20px; font-weight: 650; }
+  .col .l { font-size: 11px; color: var(--dim); }
+  .col.needs .n { color: var(--warn); }
+  .col.ready .n { color: var(--ok); }
+
+  #log { overflow-y: auto; padding: 10px 16px 20px; min-height: 0; }
+  .ev { display: flex; gap: 8px; padding: 4px 0; border-bottom: 1px solid #1c2130; font-size: 12.5px; }
+  .ev .t { color: #59617a; font-variant-numeric: tabular-nums; flex: none; }
+  .ev .m { color: var(--dim); }
+  .ev.ok .m { color: var(--ok); }
+  .ev.bad .m { color: var(--bad); }
+  .ev.warn .m { color: var(--warn); }
+
+  .banner {
+    position: absolute; left: 50%; top: 18px; transform: translateX(-50%);
+    background: #3b2a10; border: 1px solid #6b4d12; color: #ffd88a;
+    padding: 8px 16px; border-radius: 10px; font-size: 13px; display: none;
+  }
+  .banner.show { display: block; }
+
+  /* Review mode (Roadmap 8.5). Present only when the server was started with --review, so a
+     page opened to watch a run has no button that could become a decision. */
+  #review { display: none; }
+  #review.show { display: block; }
+  .decision {
+    background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: 8px; padding: 8px 10px; margin-bottom: 6px; font-size: 12.5px;
+  }
+  .decision.gate { border-color: #6b4d12; }
+  .decision .who { color: var(--dim); font-size: 11px; margin-bottom: 4px; }
+  .decision .acts { display: flex; gap: 6px; margin-top: 6px; }
+  .decision button {
+    background: #1b2233; border: 1px solid var(--line); color: var(--fg);
+    border-radius: 6px; padding: 3px 10px; font-size: 12px; cursor: pointer;
+    font-family: inherit;
+  }
+  .decision button:hover { border-color: #59617a; }
+  .decision button.approve:hover { border-color: var(--ok); color: var(--ok); }
+  .decision button.reject:hover { border-color: var(--bad); color: var(--bad); }
+  .decision button.ship:hover { border-color: var(--ok); color: var(--ok); }
+  .decision button[disabled] { opacity: .5; cursor: default; }
+  footer { padding: 8px 20px; color: #59617a; font-size: 12px; border-top: 1px solid var(--line); }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>The Office</h1>
+    <span class="task" id="task">waiting for a run…</span>
+    <span class="pill" id="tokens">0 tokens</span>
+    <span class="pill" id="status">idle</span>
+  </header>
+  <main>
+    <div id="stage">
+      <canvas id="office"></canvas>
+      <div class="banner" id="banner"></div>
+    </div>
+    <aside>
+      <div class="section">
+        <h2>Board</h2>
+        <div class="cols" id="cols"></div>
+      </div>
+      <div class="section" id="review">
+        <h2>Waiting for you</h2>
+        <div id="decisions"></div>
+      </div>
+      <div id="log"></div>
+    </aside>
+  </main>
+</div>
+
+<script>
+/* The office is a reader. It polls two read-only endpoints and animates what it finds;
+   it never posts, and nothing here can change a run. */
+
+const ROLE_COLORS = {
+  decomposer: '#f0abfc',
+  researcher: '#7dd3fc',
+  planner:    '#a5b4fc',
+  implementer:'#86efac',
+  verifier:   '#fcd34d',
+};
+const ROLE_ORDER = ['decomposer', 'researcher', 'planner', 'implementer', 'verifier'];
+
+const canvas = document.getElementById('office');
+const ctx = canvas.getContext('2d');
+let W = 0, H = 0, DPR = 1;
+
+function resize() {
+  DPR = window.devicePixelRatio || 1;
+  const r = canvas.getBoundingClientRect();
+  W = r.width; H = r.height;
+  canvas.width = Math.floor(W * DPR);
+  canvas.height = Math.floor(H * DPR);
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+}
+window.addEventListener('resize', resize);
+
+/* ---------------------------------------------------------------- people --- */
+
+class Person {
+  constructor(role, agent) {
+    this.role = role;
+    this.agent = agent || role;
+    this.color = ROLE_COLORS[role] || '#c084fc';
+    this.x = 40; this.y = 0;          // current position
+    this.tx = 40; this.ty = 0;        // target
+    this.state = 'away';              // away | walking | working | idle | talking
+    this.phase = Math.random() * 6.28;
+    this.mark = null;                 // '✓' | '✗' | '?'
+    this.markUntil = 0;
+    this.bubble = null;
+    this.desk = { x: 0, y: 0 };
+  }
+  goTo(x, y, state) { this.tx = x; this.ty = y; this.state = state || 'walking'; }
+  update(dt, now) {
+    const dx = this.tx - this.x, dy = this.ty - this.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist > 1.5) {
+      const speed = 150 * dt;
+      this.x += (dx / dist) * Math.min(speed, dist);
+      this.y += (dy / dist) * Math.min(speed, dist);
+      if (this.state !== 'talking') this.state = 'walking';
+    } else if (this.state === 'walking') {
+      this.state = this.pending || 'idle';
+      this.pending = null;
+    }
+    this.phase += dt * (this.state === 'working' ? 7 : 3);
+    if (this.mark && now > this.markUntil) this.mark = null;
+  }
+  draw(g, now) {
+    if (this.state === 'away') return;
+    const walking = Math.hypot(this.tx - this.x, this.ty - this.y) > 1.5;
+    const bob = this.state === 'working' ? Math.sin(this.phase) * 1.6
+              : walking ? Math.abs(Math.sin(this.phase)) * 2.2 : Math.sin(this.phase * .5) * .8;
+    const x = this.x, y = this.y + bob;
+
+    // shadow
+    g.fillStyle = 'rgba(0,0,0,.35)';
+    g.beginPath(); g.ellipse(x, y + 20, 12, 4, 0, 0, 6.29); g.fill();
+
+    // legs
+    const swing = walking ? Math.sin(this.phase) * 4 : 0;
+    g.strokeStyle = '#2c3446'; g.lineWidth = 4; g.lineCap = 'round';
+    g.beginPath(); g.moveTo(x - 3, y + 10); g.lineTo(x - 3 + swing, y + 20); g.stroke();
+    g.beginPath(); g.moveTo(x + 3, y + 10); g.lineTo(x + 3 - swing, y + 20); g.stroke();
+
+    // body
+    g.fillStyle = this.color;
+    g.beginPath();
+    g.roundRect(x - 9, y - 6, 18, 18, 6);
+    g.fill();
+
+    // arms — reaching forward when working
+    g.strokeStyle = this.color; g.lineWidth = 3.5;
+    const reach = this.state === 'working' ? 8 + Math.sin(this.phase) * 2 : 0;
+    g.beginPath(); g.moveTo(x - 8, y + 1); g.lineTo(x - 10 - reach * .3, y + 7 - reach * .4); g.stroke();
+    g.beginPath(); g.moveTo(x + 8, y + 1); g.lineTo(x + 10 + reach * .3, y + 7 - reach * .4); g.stroke();
+
+    // head
+    g.fillStyle = '#f3e7d9';
+    g.beginPath(); g.arc(x, y - 14, 7.5, 0, 6.29); g.fill();
+    g.fillStyle = '#2c3446';
+    g.beginPath(); g.arc(x - 2.5, y - 15, 1.1, 0, 6.29); g.fill();
+    g.beginPath(); g.arc(x + 2.5, y - 15, 1.1, 0, 6.29); g.fill();
+
+    // name
+    g.fillStyle = '#8b93a7'; g.font = '10px ui-sans-serif, system-ui'; g.textAlign = 'center';
+    g.fillText(this.role, x, y + 34);
+
+    // thought bubble while working
+    if (this.state === 'working') {
+      const dots = 1 + (Math.floor(now / 400) % 3);
+      g.fillStyle = 'rgba(255,255,255,.10)';
+      g.beginPath(); g.roundRect(x + 12, y - 34, 30, 16, 8); g.fill();
+      g.fillStyle = '#cbd5e1'; g.font = '11px ui-sans-serif';
+      g.fillText('.'.repeat(dots), x + 27, y - 23);
+    }
+    if (this.state === 'talking') {
+      g.fillStyle = 'rgba(255,255,255,.10)';
+      g.beginPath(); g.roundRect(x + 12, y - 34, 46, 16, 8); g.fill();
+      g.fillStyle = '#cbd5e1'; g.font = '10px ui-sans-serif';
+      g.fillText('handing off', x + 35, y - 23);
+    }
+    if (this.mark) {
+      g.font = 'bold 16px ui-sans-serif';
+      g.fillStyle = this.mark === '✓' ? '#4ade80' : this.mark === '✗' ? '#f87171' : '#fbbf24';
+      g.fillText(this.mark, x, y - 28);
+    }
+  }
+}
+
+/* Roadmap 8.1. The office used to hold one Person per role, which was true of a single
+ * session and a lie about a goal: with `--parallel 3` three sessions shared one row of desks
+ * and the office showed whichever had written most recently. People are now keyed by
+ * `session|role` and desks are laid out in rows — one row per session the goal started, so
+ * the picture is a team. A run that belongs to no goal reports itself as one session, and
+ * lays out exactly as it always did: one row, one desk per role. */
+
+let people = new Map();
+let deskSlots = [];
+let rows = [];          // [{ key, label, roles: [...], y }] in the order the goal started them
+
+function layout() {
+  const margin = 110;
+  const span = Math.max(W - margin * 2, 120);
+  const rowCount = Math.max(rows.length, 1);
+  /* One session sits exactly where the single desk always sat. Several share the floor
+   * between these two lines, so the topmost row never climbs into the wall art. */
+  const top = H * 0.44;
+  const bottom = H * 0.68;
+
+  deskSlots = [];
+  rows.forEach((row, r) => {
+    row.y = rowCount === 1 ? H * 0.62 : top + ((bottom - top) / (rowCount - 1)) * r;
+    const n = Math.max(row.roles.length, 1);
+    row.roles.forEach((role, i) => {
+      deskSlots.push({
+        key: row.key,
+        role,
+        label: i === 0 ? row.label : null,
+        x: margin + (n === 1 ? span / 2 : (span / (n - 1)) * i),
+        y: row.y,
+      });
+    });
+  });
+
+  deskSlots.forEach(slot => {
+    const p = people.get(slot.key + '|' + slot.role);
+    if (!p) return;
+    p.desk = { x: slot.x, y: slot.y };
+    if (p.state === 'idle' || p.state === 'working') { p.tx = slot.x; p.ty = slot.y; }
+  });
+}
+
+function sessionKey(session) {
+  return String(session.task_id || session.run_id || 'session');
+}
+
+function sessionLabel(session) {
+  const name = session.task_id || session.run_id || '';
+  const task = session.task ? String(session.task) : '';
+  if (task && task.length > 34) return task.slice(0, 33) + '…';
+  return task || name;
+}
+
+/* The roster, rebuilt only when the set of (session, role) pairs actually changes — a
+ * Person carries animation state, and rebuilding on every poll would reset it 60 times a
+ * minute. */
+function ensureTeam(sessions) {
+  const list = (sessions || []).filter(s => s && (s.agents || []).length);
+  if (!list.length) return;
+
+  const nextRows = list.map(session => {
+    const roles = [];
+    (session.agents || []).forEach(a => {
+      if (a && a.role && !roles.includes(a.role)) roles.push(a.role);
+    });
+    roles.sort((a, b) => ROLE_ORDER.indexOf(a) - ROLE_ORDER.indexOf(b));
+    return { key: sessionKey(session), label: sessionLabel(session), roles, session };
+  }).filter(row => row.roles.length);
+
+  const signature = nextRows.map(r => r.key + ':' + r.roles.join(',')).join(';');
+  if (signature === people._key) return;
+
+  const next = new Map();
+  nextRows.forEach(row => {
+    row.roles.forEach(role => {
+      const id = row.key + '|' + role;
+      const agent = ((row.session.agents || []).find(a => a.role === role) || {}).agent;
+      next.set(id, people.get(id) || new Person(role, agent));
+    });
+  });
+  next._key = signature;
+  people = next;
+  rows = nextRows;
+  layout();
+}
+
+/* ------------------------------------------------------------- the scene --- */
+
+function drawOffice(g, now) {
+  g.clearRect(0, 0, W, H);
+
+  // floor
+  const floorY = H * 0.72;
+  g.fillStyle = '#141926';
+  g.fillRect(0, floorY, W, H - floorY);
+  g.strokeStyle = '#1b2233'; g.lineWidth = 1;
+  for (let x = 0; x < W; x += 46) {
+    g.beginPath(); g.moveTo(x, floorY); g.lineTo(x - 40, H); g.stroke();
+  }
+  g.beginPath(); g.moveTo(0, floorY); g.lineTo(W, floorY); g.stroke();
+
+  // back wall + door
+  g.fillStyle = '#11151f'; g.fillRect(0, 0, W, floorY);
+  g.fillStyle = '#1b2233';
+  g.beginPath(); g.roundRect(24, floorY - 96, 44, 96, [6, 6, 0, 0]); g.fill();
+  g.fillStyle = '#59617a'; g.font = '10px ui-sans-serif'; g.textAlign = 'center';
+  g.fillText('door', 46, floorY - 104);
+
+  // desks
+  deskSlots.forEach(slot => {
+    const p = people.get(slot.key + '|' + slot.role);
+    if (slot.label && rows.length > 1) {
+      g.fillStyle = '#59617a';
+      g.font = '10px ui-sans-serif';
+      g.textAlign = 'left';
+      g.fillText(slot.label, 12, slot.y - 18);
+      g.textAlign = 'center';
+    }
+    g.fillStyle = '#1e2430';
+    g.beginPath(); g.roundRect(slot.x - 34, slot.y + 6, 68, 30, 6); g.fill();
+    g.fillStyle = '#0f1420';
+    g.beginPath(); g.roundRect(slot.x - 16, slot.y - 12, 32, 20, 3); g.fill();
+    g.fillStyle = p && p.state === 'working' ? (p.color + 'cc') : '#243047';
+    g.beginPath(); g.roundRect(slot.x - 14, slot.y - 10, 28, 16, 2); g.fill();
+  });
+
+  [...people.values()].forEach(p => p.draw(g, now));
+}
+
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min((now - last) / 1000, 0.05);
+  last = now;
+  [...people.values()].forEach(p => p.update(dt, now));
+  drawOffice(ctx, now);
+  requestAnimationFrame(frame);
+}
+
+/* ------------------------------------------------------------ the events --- */
+
+/* One high-water mark per session rather than one for the office: two sessions number
+ * their events independently, and a single counter would silently swallow the slower one. */
+let seenBySession = {};
+const logEl = document.getElementById('log');
+
+function addLog(text, kind) {
+  const row = document.createElement('div');
+  row.className = 'ev ' + (kind || '');
+  const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  row.innerHTML = '<span class="t"></span><span class="m"></span>';
+  row.children[0].textContent = time;
+  row.children[1].textContent = text;
+  logEl.prepend(row);
+  while (logEl.children.length > 120) logEl.lastChild.remove();
+}
+
+function rowFor(key) {
+  return rows.find(r => r.key === key) || rows[0] || null;
+}
+
+function nextRole(key, role) {
+  const row = rowFor(key);
+  if (!row) return null;
+  const i = row.roles.indexOf(role);
+  return i >= 0 && i < row.roles.length - 1 ? row.roles[i + 1] : null;
+}
+
+function personIn(key, role) {
+  const row = rowFor(key);
+  return row ? people.get(row.key + '|' + role) : null;
+}
+
+function handleEvent(ev, key) {
+  const kind = ev.event;
+
+  if (kind === 'agent_started') {
+    const p = personIn(key, ev.role);
+    if (p) {
+      if (p.state === 'away') { p.x = 46; p.y = H * 0.72 - 10; }
+      p.pending = 'working';
+      p.goTo(p.desk.x, p.desk.y, 'walking');
+      p.mark = null;
+    }
+    addLog(`${ev.role} (${ev.agent}) started` + (ev.repair_attempt ? ` — repair #${ev.repair_attempt}` : ''));
+    return;
+  }
+
+  if (kind === 'agent_result') {
+    const r = ev.result || {};
+    const p = personIn(key, r.role);
+    const failed = r.status === 'error';
+    if (p) {
+      p.mark = failed ? '✗' : (r.verdict === 'PASS' ? '✓' : r.verdict === 'FAIL' ? '✗' : '✓');
+      p.markUntil = performance.now() + 4000;
+      const nxt = nextRole(key, r.role);
+      const target = nxt && personIn(key, nxt);
+      if (target && !failed) {
+        p.pending = 'idle';
+        p.goTo(target.desk.x - 34, target.desk.y + 4, 'walking');
+        setTimeout(() => { p.state = 'talking'; }, 700);
+        setTimeout(() => { p.goTo(p.desk.x, p.desk.y, 'walking'); }, 2000);
+      } else {
+        p.state = 'idle';
+      }
+    }
+    const t = (r.token_usage && r.token_usage.total_tokens) || 0;
+    addLog(`${r.role} finished${r.verdict ? ' — ' + r.verdict : ''}${t ? ' — ' + t.toLocaleString() + ' tokens' : ''}`,
+           failed || r.verdict === 'FAIL' ? 'bad' : 'ok');
+    return;
+  }
+
+  if (kind === 'acceptance') {
+    const c = ev.check || {};
+    if (c.skipped) return;
+    addLog(`acceptance gate ${c.ok ? 'passed' : 'failed'} (exit ${c.exit_code})`, c.ok ? 'ok' : 'bad');
+    return;
+  }
+  if (kind === 'verification') {
+    const rec = ev.record || {};
+    addLog(`verification #${rec.attempt}: ${rec.verdict}`, rec.verdict === 'PASS' ? 'ok' : 'bad');
+    return;
+  }
+  if (kind === 'task_plan') {
+    const plan = ev.plan || {};
+    addLog(`plan: ${(plan.tasks || []).length} task(s)`, 'ok');
+    return;
+  }
+  if (kind === 'run_started') { addLog('run started', 'ok'); return; }
+  if (kind === 'run_finished') {
+    const s = ev.summary || {};
+    addLog(`run finished — ${s.status}`, s.status === 'completed' ? 'ok' : 'bad');
+    const row = rowFor(key);
+    (row ? row.roles.map(role => people.get(row.key + '|' + role)) : [...people.values()])
+      .forEach(p => { if (p && p.state === 'working') p.state = 'idle'; });
+    return;
+  }
+  if (kind === 'workspace') {
+    const w = ev.workspace || {};
+    if (w.branch) addLog(`workspace on ${w.branch}`);
+    return;
+  }
+}
+
+/* ----------------------------------------------------- live, or polling --- */
+
+/* The office was built as a poller: every 900ms it re-read the last 200 events and looked
+ * for ones it had not seen. When it is served by the daemon (Roadmap Phase 8) there is a
+ * stream instead, and the events arrive as they are appended. The poll stays as the fallback
+ * for `--serve`, which has no stream and is not going to grow one - that is what keeps this
+ * page a dependency-free view that works against either server. */
+
+const tokenMeta = document.querySelector('meta[name="orchestrator-token"]');
+const rawToken = tokenMeta ? tokenMeta.getAttribute('content') : '';
+const TOKEN = (rawToken && rawToken.indexOf('__') !== 0) ? rawToken : '';
+let streaming = false;
+let tokensSpent = 0;
+
+/* Every read is the same read it always was; the daemon simply requires the token it minted
+ * to be presented with it. Under `--serve` there is no token and nothing is presented. */
+function apiGet(path) {
+  const options = TOKEN ? { headers: { 'X-Orchestrator-Token': TOKEN } } : {};
+  return fetch(path, options).then(r => r.json());
+}
+
+/* The stream names one run at a time, so its events have to be attributed to a session; the
+ * poll below is what keeps the roster itself honest for every other session of the goal. */
+let streamRunId = null;
+
+function keyForRunId(runId) {
+  const row = rows.find(r => r.session && r.session.run_id === runId);
+  return row ? row.key : (rows[0] ? rows[0].key : 'session');
+}
+
+function showActivity(activity) {
+  streamRunId = activity.run_id || streamRunId;
+  if (activity.sessions && activity.sessions.length) ensureTeam(activity.sessions);
+  const label = activity.goal_id && activity.sessions && activity.sessions.length > 1
+    ? `${activity.sessions.length} tasks — ${activity.task || ''}`
+    : (activity.task || 'waiting for a run…');
+  document.getElementById('task').textContent = label;
+  const st = document.getElementById('status');
+  st.textContent = activity.status || 'idle';
+  st.className = 'pill' + (activity.status === 'running' ? ' live' : '');
+}
+
+function countTokens(ev) {
+  if (ev.event !== 'agent_result') return;
+  const u = (ev.result || {}).token_usage || {};
+  if (u.available && u.total_tokens) {
+    tokensSpent += u.total_tokens;
+    document.getElementById('tokens').textContent = tokensSpent.toLocaleString() + ' tokens';
+  }
+}
+
+function connect() {
+  if (!TOKEN || !window.EventSource) return;
+  let source;
+  try {
+    source = new EventSource('/api/stream?since=-1&token=' + encodeURIComponent(TOKEN));
+  } catch (err) { return; }
+
+  source.addEventListener('hello', (m) => {
+    streaming = true;
+    seenBySession = {}; tokensSpent = 0;
+    showActivity(JSON.parse(m.data));
+  });
+  source.addEventListener('activity', (m) => {
+    seenBySession = {}; tokensSpent = 0;
+    showActivity(JSON.parse(m.data));
+  });
+  source.addEventListener('orchestrator', (m) => {
+    const ev = JSON.parse(m.data);
+    const key = keyForRunId(streamRunId);
+    if ((ev.sequence || 0) <= (seenBySession[key] || 0)) return;
+    seenBySession[key] = ev.sequence;
+    handleEvent(ev, key);
+  });
+  source.addEventListener('error', () => { streaming = false; });
+}
+
+async function poll() {
+  try {
+    const board = await apiGet('/api/board');
+    renderBoard(board);
+    renderDecisions(board);
+
+    /* The poll runs even while streaming, because the stream follows one run and a goal has
+     * several. What it costs is one read of a projection the server already assembles; what
+     * it buys is that a sibling session's desk is never stale. Every event is deduped per
+     * session, so an event that arrived on the stream first is not replayed here. */
+    const activity = await apiGet('/api/activity');
+    showActivity(activity);
+
+    const sessions = activity.sessions || [];
+
+    /* Tokens are recomputed from what the sessions report rather than accumulated as events
+     * arrive: a number that two sources both add to is a number that double-counts. */
+    tokensSpent = 0;
+    sessions.forEach(s => (s.events || []).forEach(countTokens));
+
+    sessions.forEach(s => {
+      const key = sessionKey(s);
+      (s.events || []).forEach(ev => {
+        if ((ev.sequence || 0) > (seenBySession[key] || 0)) {
+          seenBySession[key] = ev.sequence;
+          handleEvent(ev, key);
+        }
+      });
+    });
+  } catch (err) {
+    /* the CLI may be between runs; try again on the next tick */
+  }
+}
+
+/* Roadmap 8.5. `--serve` stays read-only, `--design` writes only the team file, and this is
+ * the only mode that can decide something about a run. The page asks the server what it is
+ * allowed to do rather than assuming: buttons that exist but are always refused are worse
+ * than no buttons, and buttons on a read-only server would be exactly the stray click the
+ * read-only guarantee exists to prevent. */
+let modes = { review: false, team_writable: false, read_only: true };
+
+async function loadModes() {
+  try { modes = await apiGet('/api/modes'); } catch (err) { /* an older server: stay read-only */ }
+  document.getElementById('review').classList.toggle('show', !!modes.review);
+}
+
+async function review(action, body, button) {
+  button.disabled = true;
+  try {
+    const response = await fetch('/api/review/' + action, {
+      method: 'POST',
+      headers: Object.assign({ 'Content-Type': 'application/json' },
+                             TOKEN ? { 'X-Orchestrator-Token': TOKEN } : {}),
+      body: JSON.stringify(body),
+    });
+    const result = await response.json();
+    addLog(result.ok ? `${action}d ${body.id || body.card}`
+                     : `could not ${action}: ${result.error}`,
+           result.ok ? 'ok' : 'bad');
+  } catch (err) {
+    addLog(`could not ${action}: ${err}`, 'bad');
+  } finally {
+    button.disabled = false;
+    poll();
+  }
+}
+
+function decisionCard(className, title, subtitle, actions) {
+  const card = document.createElement('div');
+  card.className = 'decision ' + className;
+  const head = document.createElement('div');
+  head.textContent = title;
+  const who = document.createElement('div');
+  who.className = 'who';
+  who.textContent = subtitle;
+  const acts = document.createElement('div');
+  acts.className = 'acts';
+  actions.forEach(([label, cls, onClick]) => {
+    const button = document.createElement('button');
+    button.className = cls;
+    button.textContent = label;
+    button.onclick = () => onClick(button);
+    acts.appendChild(button);
+  });
+  card.appendChild(head);
+  card.appendChild(who);
+  card.appendChild(acts);
+  return card;
+}
+
+async function renderDecisions(board) {
+  if (!modes.review) return;
+  const host = document.getElementById('decisions');
+  host.innerHTML = '';
+
+  let gates = [];
+  try { gates = (await apiGet('/api/approvals')).approvals || []; } catch (err) { gates = []; }
+
+  gates.forEach(gate => {
+    host.appendChild(decisionCard('gate', gate.question || 'an approval is waiting',
+      gate.subject || gate.id, [
+        ['approve', 'approve', (b) => review('approve', { id: gate.id, note: 'approved from the office' }, b)],
+        ['reject', 'reject', (b) => review('reject', { id: gate.id, note: 'rejected from the office' }, b)],
+      ]));
+  });
+
+  const ready = (board && board.columns && board.columns['Ready to Merge']) || [];
+  ready.forEach(card => {
+    host.appendChild(decisionCard('', card.title || card.id, card.branch || card.id, [
+      ['deliver', 'ship', (b) => review('deliver', { card: card.id }, b)],
+    ]));
+  });
+
+  if (!gates.length && !ready.length) {
+    const quiet = document.createElement('div');
+    quiet.className = 'decision';
+    quiet.textContent = 'Nothing is waiting on you.';
+    host.appendChild(quiet);
+  }
+}
+
+function renderBoard(board) {
+  const counts = (board && board.counts) || {};
+  const order = ['Queued', 'Working', 'Needs You', 'In Review', 'Ready to Merge', 'Stalled'];
+  const el = document.getElementById('cols');
+  el.innerHTML = '';
+  order.forEach(name => {
+    const div = document.createElement('div');
+    div.className = 'col' + (name === 'Needs You' ? ' needs' : name === 'Ready to Merge' ? ' ready' : '');
+    div.innerHTML = '<div class="n"></div><div class="l"></div>';
+    div.children[0].textContent = counts[name] || 0;
+    div.children[1].textContent = name;
+    el.appendChild(div);
+  });
+
+  const banner = document.getElementById('banner');
+  const needs = (board && board.columns && board.columns['Needs You']) || [];
+  if (needs.length) {
+    banner.textContent = needs.length + ' card(s) need you — ' + (needs[0].title || '');
+    banner.classList.add('show');
+  } else {
+    banner.classList.remove('show');
+  }
+}
+
+resize();
+requestAnimationFrame(frame);
+connect();
+loadModes();
+poll();
+setInterval(poll, 900);
+</script>
+</body>
+</html>

@@ -10,3 +10,10 @@ langchain-openai
 # Configuration & environment management
 python-dotenv
 colorama  # Required on Windows for colored console logging
+
+# The daemon's live agent terminal (Roadmap Phase 10): a real pseudo-terminal on Windows,
+# so an agent with its own interactive TUI (OpenCode) renders that TUI in the cockpit's
+# panel instead of a separate window. Optional in the sense that its absence only turns
+# off that one capability - terminals.pty_available() checks for it rather than assuming
+# either way, and every other agent is unaffected either way.
+pywinpty; sys_platform == "win32"

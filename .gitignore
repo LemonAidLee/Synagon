@@ -24,5 +24,24 @@ build/
 .vscode/
 .idea/
 
-# Durable run store (Tier 1 #4) - local run history, not source
+# Durable run store (Tier 1 #4) - local run history, not source.
+# Goals, approvals and delivery records live here too, for the same reason.
 .orchestrator/
+
+# Backups the design surface leaves when it rewrites the team (Roadmap Phase 7)
+orchestrator.yaml.bak-*
+*.yaml.bak-*
+
+# LangGraph API runtime state (a local pickle, not source)
+.langgraph_api/
+
+# Node dependencies for the Electron shell. 557 MB of other people's code, and
+# package-lock.json is what actually pins it.
+desktop/node_modules/
+node_modules/
+
+# Local experiment scripts and throwaway artifacts. Kept on disk, out of the
+# repo: an agent reading this project treats anything committed as design.
+scratch/
+*.vsix
+!tools/antigravity_terminal_bridge.vsix

@@ -9,11 +9,12 @@ from orchestrator.agents.verifier import parse_verdict
 from orchestrator.prompts import build_verifier_prompt
 from orchestrator.config import (
     ConfigValidationError,
+    DEFAULT_CONFIG,
     load_config,
     validate_config,
     get_max_repair_attempts,
 )
-from orchestrator.graph import graph, should_repair_or_end
+from orchestrator.graph import build_graph, should_repair_or_end
 from orchestrator.tracer import default_tracer
 
 
@@ -125,9 +126,10 @@ class TestRepairWorkflow(unittest.TestCase):
             "VERDICT: PASS\n\nSummary: Implementation verified.",
         ]
 
-        result = graph.invoke({
+        result = build_graph(DEFAULT_CONFIG).invoke({
             "task": "Build feature A",
             "project_root": os.getcwd(),
+            "config": DEFAULT_CONFIG,
             "run_store_enabled": False,
             "workspace": {"isolated": False, "path": os.getcwd()},
         })
@@ -158,9 +160,10 @@ class TestRepairWorkflow(unittest.TestCase):
             "VERDICT: PASS\n\nSummary: Bug resolved. Tests pass.",
         ]
 
-        result = graph.invoke({
+        result = build_graph(DEFAULT_CONFIG).invoke({
             "task": "Fix the formula in calc.py",
             "project_root": os.getcwd(),
+            "config": DEFAULT_CONFIG,
             "run_store_enabled": False,
             "workspace": {"isolated": False, "path": os.getcwd()},
             "max_repair_attempts": 2,
@@ -204,9 +207,10 @@ class TestRepairWorkflow(unittest.TestCase):
             "VERDICT: FAIL\n\nFindings: error 3",
         ]
 
-        result = graph.invoke({
+        result = build_graph(DEFAULT_CONFIG).invoke({
             "task": "Fix difficult bug",
             "project_root": os.getcwd(),
+            "config": DEFAULT_CONFIG,
             "run_store_enabled": False,
             "workspace": {"isolated": False, "path": os.getcwd()},
             "max_repair_attempts": 2,
@@ -235,9 +239,10 @@ class TestRepairWorkflow(unittest.TestCase):
             "VERDICT: FAIL\n\nFindings: test failed",
         ]
 
-        result = graph.invoke({
+        result = build_graph(DEFAULT_CONFIG).invoke({
             "task": "Test zero repairs mode",
             "project_root": os.getcwd(),
+            "config": DEFAULT_CONFIG,
             "run_store_enabled": False,
             "workspace": {"isolated": False, "path": os.getcwd()},
             "max_repair_attempts": 0,
@@ -270,9 +275,10 @@ class TestRepairWorkflow(unittest.TestCase):
             "Another ambiguous output.",
         ]
 
-        result = graph.invoke({
+        result = build_graph(DEFAULT_CONFIG).invoke({
             "task": "Test unknown verdict safety",
             "project_root": os.getcwd(),
+            "config": DEFAULT_CONFIG,
             "run_store_enabled": False,
             "workspace": {"isolated": False, "path": os.getcwd()},
             "max_repair_attempts": 1,
@@ -298,9 +304,10 @@ class TestRepairWorkflow(unittest.TestCase):
             "VERDICT: PASS\n\nSummary: Pass 2",
         ]
 
-        result = graph.invoke({
+        result = build_graph(DEFAULT_CONFIG).invoke({
             "task": "Test history preservation",
             "project_root": os.getcwd(),
+            "config": DEFAULT_CONFIG,
             "run_store_enabled": False,
             "workspace": {"isolated": False, "path": os.getcwd()},
             "max_repair_attempts": 2,

@@ -1,8 +1,9 @@
 """Execution tracing module providing observable progress tracking and formatted terminal output."""
 
+import threading
 import time
 from dataclasses import dataclass, field
-from typing import List, Optional, Any
+from typing import Dict, List, Optional, Any
 from colorama import Fore, Style, init
 
 from orchestrator.types import TokenUsage
@@ -33,25 +34,55 @@ class ExecutionTracer:
         self.events: List[WorkflowEvent] = []
         self._start_time: float = time.time()
         self._step_timers: dict = {}
+        # Parallel tasks (Roadmap Phase 3) emit through this one tracer from several threads.
+        # The lock keeps a line from being interleaved with another line; the thread-local
+        # label says which task a line belongs to, which is the difference between watching a
+        # delegated goal and watching noise.
+        self._lock = threading.RLock()
+        self._local = threading.local()
 
     def clear(self) -> None:
         """Clear recorded events and reset timers."""
-        self.events.clear()
-        self._start_time = time.time()
-        self._step_timers.clear()
+        with self._lock:
+            self.events.clear()
+            self._start_time = time.time()
+            self._step_timers.clear()
+
+    def set_label(self, label: Optional[str]) -> None:
+        """Label this thread's output with the task it is running."""
+        self._local.label = label
+
+    def clear_label(self) -> None:
+        """Stop labelling this thread's output."""
+        self._local.label = None
+
+    @property
+    def label(self) -> Optional[str]:
+        return getattr(self._local, "label", None)
 
     def get_events(self) -> List[WorkflowEvent]:
         """Return a copy of all recorded events."""
         return list(self.events)
 
     def _emit(self, event: WorkflowEvent, console_msg: Optional[str] = None) -> None:
-        self.events.append(event)
-        if self.verbose and console_msg:
-            try:
-                print(console_msg)
-            except UnicodeEncodeError:
-                safe_msg = console_msg.encode("ascii", errors="replace").decode("ascii")
-                print(safe_msg)
+        label = self.label
+        if label:
+            event.metadata = dict(event.metadata or {})
+            event.metadata["task_id"] = label
+        with self._lock:
+            self.events.append(event)
+            if self.verbose and console_msg:
+                if label:
+                    prefix = f"{Fore.LIGHTBLACK_EX}[{label}]{Style.RESET_ALL} "
+                    console_msg = "\n".join(
+                        (prefix + line if line.strip() else line)
+                        for line in console_msg.splitlines()
+                    )
+                try:
+                    print(console_msg)
+                except UnicodeEncodeError:
+                    safe_msg = console_msg.encode("ascii", errors="replace").decode("ascii")
+                    print(safe_msg)
 
     # 1. Workflow started
     def log_workflow_start(self, task: str) -> None:
@@ -241,6 +272,55 @@ class ExecutionTracer:
             ),
         )
         return elapsed
+
+    def log_agent_retry(
+        self,
+        agent: str,
+        role: str,
+        attempt: int,
+        of: int,
+        reason: str,
+        model: Optional[str] = None,
+        next_model: Optional[str] = None,
+        backoff_seconds: float = 0.0,
+    ) -> None:
+        """Report that an execution failed and is about to be attempted again.
+
+        Said on the console rather than swallowed: a run that pauses for eight seconds with
+        no explanation looks hung, and a retry that nobody can see is a cost nobody can audit.
+        """
+        switching = (
+            f" -> {next_model}" if next_model and next_model != model else ""
+        )
+        self._emit(
+            WorkflowEvent(
+                name="agent_retry",
+                stage=agent,
+                agent=agent,
+                role=role,
+                model=model,
+                message=(
+                    f"{agent} ({role}) attempt {attempt}/{of} failed: {reason}. "
+                    f"Retrying in {backoff_seconds:.1f}s{switching}"
+                ),
+                status="retrying",
+                metadata={
+                    "agent": agent,
+                    "role": role,
+                    "attempt": attempt,
+                    "of": of,
+                    "reason": reason,
+                    "model": model,
+                    "next_model": next_model,
+                    "backoff_seconds": backoff_seconds,
+                },
+            ),
+            console_msg=(
+                f"  {Fore.YELLOW}[RETRY]{Style.RESET_ALL} {agent} ({role}) "
+                f"attempt {attempt}/{of} failed: {reason}\n"
+                f"          retrying in {backoff_seconds:.1f}s{switching}"
+            ),
+        )
 
     def log_terminal_launch(
         self,
@@ -826,20 +906,550 @@ class ExecutionTracer:
         description: str,
         change_count: int = 0,
         commit: Optional[str] = None,
+        retention: Optional[str] = None,
     ) -> None:
         commit_line = f"\n  {Fore.LIGHTBLACK_EX}Committed:{Style.RESET_ALL} {commit}" if commit else ""
+        retention_line = (
+            f"\n  {Fore.LIGHTBLACK_EX}Cleanup:{Style.RESET_ALL} {retention}" if retention else ""
+        )
         self._emit(
             WorkflowEvent(
                 name="workspace_result",
                 stage="workflow",
                 message=f"Run changed {change_count} path(s)",
                 status="info",
-                metadata={"change_count": change_count, "commit": commit},
+                metadata={
+                    "change_count": change_count,
+                    "commit": commit,
+                    "retention": retention,
+                },
             ),
             console_msg=(
                 f"\n{Fore.CYAN}{description}{Style.RESET_ALL}\n"
                 f"  {Fore.LIGHTBLACK_EX}Changed paths:{Style.RESET_ALL} {change_count}"
-                f"{commit_line}\n"
+                f"{commit_line}{retention_line}\n"
+            ),
+        )
+
+    # ------------------------------------------------------------------
+    # Delegated goals (Roadmap Phases 2-3)
+    # ------------------------------------------------------------------
+    def log_goal_start(
+        self,
+        goal: str,
+        goal_id: Optional[str] = None,
+        task_count: int = 0,
+        waves: int = 0,
+        max_parallel: int = 1,
+    ) -> None:
+        mode = "one at a time" if max_parallel <= 1 else f"up to {max_parallel} at a time"
+        self._emit(
+            WorkflowEvent(
+                name="goal_started",
+                stage="goal",
+                message=f"Delegating {task_count} task(s) for: {goal}",
+                status="started",
+                metadata={
+                    "goal_id": goal_id,
+                    "task_count": task_count,
+                    "waves": waves,
+                    "max_parallel": max_parallel,
+                },
+            ),
+            console_msg=(
+                f"\n{Fore.CYAN}{Style.BRIGHT}{'=' * 50}\n"
+                f"DELEGATING {task_count} TASK(S)\n"
+                f"{'=' * 50}{Style.RESET_ALL}\n"
+                f"  {Fore.LIGHTBLACK_EX}Goal:{Style.RESET_ALL}  {goal}\n"
+                f"  {Fore.LIGHTBLACK_EX}Waves:{Style.RESET_ALL} {waves} ({mode})\n"
+                + (f"  {Fore.LIGHTBLACK_EX}Goal:{Style.RESET_ALL}  {goal_id}\n" if goal_id else "")
+            ),
+        )
+
+    @staticmethod
+    def _short_ref(ref: str) -> str:
+        """Abbreviate a commit id; leave a branch name whole, since half a name is useless."""
+        text = str(ref or "")
+        if len(text) >= 32 and all(c in "0123456789abcdef" for c in text.lower()):
+            return text[:12]
+        return text
+
+    def log_task_start(self, task_id: str, title: str, base_ref: str = "") -> None:
+        self._emit(
+            WorkflowEvent(
+                name="task_started",
+                stage="goal",
+                message=f"Task '{task_id}' started: {title}",
+                status="started",
+                metadata={"task_id": task_id, "base_ref": base_ref},
+            ),
+            console_msg=(
+                f"\n{Fore.CYAN}{Style.BRIGHT}--> TASK {task_id}{Style.RESET_ALL} {title}\n"
+                f"  {Fore.LIGHTBLACK_EX}Starting from:{Style.RESET_ALL} {self._short_ref(base_ref)}\n"
+            ),
+        )
+
+    def log_task_finished(
+        self,
+        task_id: str,
+        state: str,
+        branch: Optional[str] = None,
+        tokens: int = 0,
+        detail: Optional[str] = None,
+    ) -> None:
+        color = Fore.GREEN if state == "done" else (
+            Fore.MAGENTA if state in ("blocked", "needs_attention") else Fore.RED
+        )
+        extra = f"\n  {Fore.LIGHTBLACK_EX}{detail}{Style.RESET_ALL}" if detail else ""
+        self._emit(
+            WorkflowEvent(
+                name="task_finished",
+                stage="goal",
+                message=f"Task '{task_id}' finished: {state}",
+                status="completed" if state == "done" else "failed",
+                metadata={"task_id": task_id, "state": state, "branch": branch, "tokens": tokens},
+            ),
+            console_msg=(
+                f"{color}<-- TASK {task_id}: {state}{Style.RESET_ALL} "
+                f"{Fore.LIGHTBLACK_EX}({tokens:,} tokens"
+                + (f", {branch}" if branch else "")
+                + f"){Style.RESET_ALL}{extra}\n"
+            ),
+        )
+
+    def log_task_skipped(self, task_id: str, reason: str, detail: str = "") -> None:
+        self._emit(
+            WorkflowEvent(
+                name="task_skipped",
+                stage="goal",
+                message=f"Task '{task_id}' skipped ({reason}): {detail}",
+                status="failed",
+                metadata={"task_id": task_id, "reason": reason},
+            ),
+            console_msg=(
+                f"{Fore.YELLOW}--- TASK {task_id}: skipped{Style.RESET_ALL} "
+                f"{Fore.LIGHTBLACK_EX}{detail}{Style.RESET_ALL}\n"
+            ),
+        )
+
+    def log_collision(self, task_ids: List[str], paths: List[str]) -> None:
+        """Report that sibling tasks changed the same files - never resolve it."""
+        shown = ", ".join(paths[:4]) + (" ..." if len(paths) > 4 else "")
+        self._emit(
+            WorkflowEvent(
+                name="collision",
+                stage="goal",
+                message=f"Tasks {' + '.join(task_ids)} both changed: {shown}",
+                status="failed",
+                metadata={"task_ids": list(task_ids), "paths": list(paths)},
+            ),
+            console_msg=(
+                f"{Fore.MAGENTA}{Style.BRIGHT}[COLLISION]{Style.RESET_ALL} "
+                f"{' + '.join(task_ids)} both changed {shown}\n"
+                f"  {Fore.LIGHTBLACK_EX}Nothing was merged; review the branches "
+                f"together.{Style.RESET_ALL}\n"
+            ),
+        )
+
+    def log_dependency_merge(
+        self,
+        merged: Optional[List[str]] = None,
+        conflicted: Optional[List[str]] = None,
+        error: Optional[str] = None,
+    ) -> None:
+        """Report bringing a task's dependencies into its workspace."""
+        if conflicted:
+            console = (
+                f"  {Fore.MAGENTA}[DEPENDENCIES] Conflict merging "
+                f"{', '.join(conflicted)}{Style.RESET_ALL}\n"
+                f"  {Fore.LIGHTBLACK_EX}Nothing was guessed at; this task needs a "
+                f"person.{Style.RESET_ALL}\n"
+            )
+        elif merged:
+            console = (
+                f"  {Fore.LIGHTBLACK_EX}Dependencies merged in:{Style.RESET_ALL} "
+                f"{', '.join(merged)}\n"
+            )
+        else:
+            console = ""
+        self._emit(
+            WorkflowEvent(
+                name="dependency_merge",
+                stage="context",
+                message=f"Merged {len(merged or [])} dependency branch(es)",
+                status="failed" if conflicted else "info",
+                metadata={
+                    "merged": list(merged or []),
+                    "conflicted": list(conflicted or []),
+                    "error": error,
+                },
+            ),
+            console_msg=console,
+        )
+
+    def log_approval_gate(
+        self,
+        gate: str,
+        subject: str,
+        state: str,
+        approval_id: str = "",
+    ) -> None:
+        """Report that an approval gate was reached, and what it said.
+
+        A pending gate is the loudest thing this tracer prints, because it is the one state
+        that will not resolve itself.
+        """
+        if state == "approved":
+            console = (
+                f"  {Fore.GREEN}[GATE OK]{Style.RESET_ALL} {gate} "
+                f"{Fore.LIGHTBLACK_EX}({subject}){Style.RESET_ALL}\n"
+            )
+        elif state == "rejected":
+            console = f"  {Fore.RED}[GATE REJECTED]{Style.RESET_ALL} {gate} - {subject}\n"
+        else:
+            console = (
+                f"\n{Fore.MAGENTA}{Style.BRIGHT}[NEEDS YOU]{Style.RESET_ALL} "
+                f"{gate}: {subject}\n"
+                f"  {Fore.LIGHTBLACK_EX}Approve with:{Style.RESET_ALL} "
+                f"python -m orchestrator --approve {approval_id}\n"
+            )
+        self._emit(
+            WorkflowEvent(
+                name="approval_gate",
+                stage="goal",
+                message=f"Approval gate '{gate}' is {state}: {subject}",
+                status="failed" if state == "pending" else "info",
+                metadata={
+                    "gate": gate,
+                    "state": state,
+                    "approval_id": approval_id,
+                    "subject": subject,
+                },
+            ),
+            console_msg=console,
+        )
+
+    def log_delivery(
+        self,
+        subject: str,
+        state: str,
+        url: str = "",
+        detail: str = "",
+    ) -> None:
+        """Report that work crossed the network, or that it was refused (Roadmap Phase 6).
+
+        A push is the loudest thing this project does to the outside world, so it is said
+        plainly and only ever after a person asked for it.
+        """
+        if state in ("refused", "failed"):
+            console = (
+                f"  {Fore.YELLOW}[NOT DELIVERED]{Style.RESET_ALL} {subject}\n"
+                f"    {Fore.LIGHTBLACK_EX}{detail}{Style.RESET_ALL}\n"
+            )
+        else:
+            console = (
+                f"  {Fore.GREEN}[DELIVERED]{Style.RESET_ALL} {subject} "
+                f"{Fore.LIGHTBLACK_EX}({state}){Style.RESET_ALL}\n"
+                + (f"    {url}\n" if url else "")
+            )
+        self._emit(
+            WorkflowEvent(
+                name="delivery",
+                stage="goal",
+                message=f"Delivery of {subject} is {state}",
+                status="failed" if state in ("refused", "failed") else "info",
+                metadata={"subject": subject, "state": state, "url": url, "detail": detail},
+            ),
+            console_msg=console,
+        )
+
+    def log_goal_resumed(self, goal_id: str, replayed: Optional[List[str]] = None) -> None:
+        """Report which tasks a resumed goal is replaying rather than re-running."""
+        names = ", ".join(replayed or []) or "nothing"
+        self._emit(
+            WorkflowEvent(
+                name="goal_resumed",
+                stage="goal",
+                message=f"Resumed goal {goal_id}; replaying {names}",
+                status="info",
+                metadata={"goal_id": goal_id, "replayed": list(replayed or [])},
+            ),
+            console_msg=(
+                f"{Fore.CYAN}{Style.BRIGHT}[RESUME]{Style.RESET_ALL} Continuing goal "
+                f"{goal_id}\n"
+                f"  {Fore.LIGHTBLACK_EX}Already delivered (not re-run):{Style.RESET_ALL} "
+                f"{names}\n"
+            ),
+        )
+
+    def log_goal_budget_exhausted(self, reason: str) -> None:
+        self._emit(
+            WorkflowEvent(
+                name="goal_budget_exhausted",
+                stage="goal",
+                message=f"Goal budget exhausted: {reason}",
+                status="failed",
+                metadata={"reason": reason},
+            ),
+            console_msg=(
+                f"\n{Fore.YELLOW}{Style.BRIGHT}[BUDGET] No further tasks will be started: "
+                f"{reason}{Style.RESET_ALL}\n"
+            ),
+        )
+
+    def log_goal_complete(
+        self,
+        status: str,
+        done: int = 0,
+        task_count: int = 0,
+        collisions: int = 0,
+    ) -> None:
+        color = Fore.GREEN if status == "completed" else (
+            Fore.MAGENTA if status == "blocked" else Fore.YELLOW
+        )
+        self._emit(
+            WorkflowEvent(
+                name="goal_finished",
+                stage="goal",
+                message=f"Goal finished: {status} ({done}/{task_count} delivered)",
+                status="completed" if status == "completed" else "failed",
+                metadata={"status": status, "done": done, "task_count": task_count},
+            ),
+            console_msg=(
+                f"\n{color}{Style.BRIGHT}{'=' * 50}\n"
+                f"GOAL {status.upper()}: {done}/{task_count} task(s) delivered"
+                + (f", {collisions} collision(s)" if collisions else "")
+                + f"\n{'=' * 50}{Style.RESET_ALL}\n"
+            ),
+        )
+
+    # ------------------------------------------------------------------
+    # Objective acceptance gate (Roadmap Phase 0)
+    # ------------------------------------------------------------------
+    def log_acceptance_start(self, command: Optional[List[str]] = None) -> None:
+        rendered = " ".join(command or []) or "(none)"
+        self._emit(
+            WorkflowEvent(
+                name="acceptance_started",
+                stage="acceptance",
+                message=f"Running the acceptance command: {rendered}",
+                status="started",
+                metadata={"command": list(command or [])},
+            ),
+            console_msg=(
+                f"\n{Fore.CYAN}[GATE]{Style.RESET_ALL} Running the project's own check\n"
+                f"  {Fore.LIGHTBLACK_EX}Command:{Style.RESET_ALL} {rendered}"
+            ),
+        )
+
+    def log_acceptance_result(
+        self,
+        ok: bool,
+        exit_code: Optional[int] = None,
+        duration_seconds: float = 0.0,
+        error: Optional[str] = None,
+        required: bool = True,
+    ) -> None:
+        """Report what the orchestrator's own check found.
+
+        Phrased as evidence rather than as a verdict: the gate reports, and
+        `status.derive_verdict` decides what its result means.
+        """
+        if error:
+            headline = f"{Fore.RED}[GATE] COULD NOT RUN{Style.RESET_ALL} {error}"
+            status = "failed"
+        elif ok:
+            headline = (
+                f"{Fore.GREEN}[GATE] PASSED{Style.RESET_ALL} "
+                f"{Fore.LIGHTBLACK_EX}(exit 0, {duration_seconds}s){Style.RESET_ALL}"
+            )
+            status = "completed"
+        else:
+            consequence = (
+                " - a verifier PASS cannot override this"
+                if required
+                else " - advisory only (acceptance.required is false)"
+            )
+            headline = (
+                f"{Fore.RED}[GATE] FAILED{Style.RESET_ALL} "
+                f"{Fore.LIGHTBLACK_EX}(exit {exit_code}, {duration_seconds}s){consequence}"
+                f"{Style.RESET_ALL}"
+            )
+            status = "failed"
+
+        self._emit(
+            WorkflowEvent(
+                name="acceptance_result",
+                stage="acceptance",
+                message=f"Acceptance gate {'passed' if ok else 'failed'}",
+                status=status,
+                elapsed_seconds=duration_seconds,
+                metadata={
+                    "ok": ok,
+                    "exit_code": exit_code,
+                    "error": error,
+                    "required": required,
+                },
+            ),
+            console_msg=f"  {headline}\n",
+        )
+
+    def log_acceptance_override(self, consensus: str, verdict: str) -> None:
+        """Report that the objective check overruled what the verifiers concluded."""
+        self._emit(
+            WorkflowEvent(
+                name="acceptance_override",
+                stage="verifier",
+                role="verifier",
+                message=f"Acceptance gate changed the verdict from {consensus} to {verdict}",
+                status="failed",
+                metadata={"consensus": consensus, "verdict": verdict},
+            ),
+            console_msg=(
+                f"  {Fore.RED}[GATE] Verdict changed {consensus} -> {verdict}:{Style.RESET_ALL} "
+                f"the acceptance command disagrees with the verifier, and it was run by the "
+                f"orchestrator.\n"
+            ),
+        )
+
+    # ------------------------------------------------------------------
+    # Goal decomposition (Roadmap Phase 1)
+    # ------------------------------------------------------------------
+    def log_task_plan(
+        self,
+        task_count: int,
+        waves: int = 0,
+        error: Optional[str] = None,
+        warnings: Optional[List[str]] = None,
+    ) -> None:
+        """Report the shape of a decomposition, without reprinting the plan itself."""
+        if error:
+            console = (
+                f"  {Fore.RED}[PLAN] Could not read a task plan:{Style.RESET_ALL} {error}\n"
+            )
+        else:
+            parallel = f", {waves} wave(s)" if waves else ""
+            console = (
+                f"  {Fore.GREEN}[PLAN]{Style.RESET_ALL} {task_count} task(s){parallel}\n"
+            )
+        for warning in warnings or []:
+            console += f"  {Fore.YELLOW}note:{Style.RESET_ALL} {warning}\n"
+
+        self._emit(
+            WorkflowEvent(
+                name="task_plan",
+                stage="decomposer",
+                role="decomposer",
+                message=f"Decomposed the goal into {task_count} task(s)",
+                status="failed" if error else "completed",
+                metadata={
+                    "task_count": task_count,
+                    "waves": waves,
+                    "error": error,
+                    "warnings": list(warnings or []),
+                },
+            ),
+            console_msg=console,
+        )
+
+    # ------------------------------------------------------------------
+    # Run budget (Tier 2 #11)
+    # ------------------------------------------------------------------
+    def log_budget_exhausted(
+        self,
+        reason: str,
+        tokens_spent: int = 0,
+        max_total_tokens: int = 0,
+        seconds_elapsed: float = 0.0,
+        max_duration_seconds: int = 0,
+        repair_attempts: int = 0,
+        max_repair_attempts: int = 0,
+    ) -> None:
+        """Report that the run stopped escalating because it hit its ceiling.
+
+        This is not a failure of the agents; it is the safety valve doing its
+        job, so it says plainly what was spent and what the remaining repair
+        budget would have been.
+        """
+        remaining = max(0, max_repair_attempts - repair_attempts)
+        token_line = (
+            f"{tokens_spent:,} / {max_total_tokens:,}" if max_total_tokens else f"{tokens_spent:,} (no limit)"
+        )
+        time_line = (
+            f"{seconds_elapsed:.0f}s / {max_duration_seconds}s"
+            if max_duration_seconds
+            else f"{seconds_elapsed:.0f}s (no limit)"
+        )
+        self._emit(
+            WorkflowEvent(
+                name="budget_exhausted",
+                stage="verifier",
+                role="verifier",
+                message=f"Run budget exhausted: {reason}",
+                status="failed",
+                metadata={
+                    "reason": reason,
+                    "tokens_spent": tokens_spent,
+                    "max_total_tokens": max_total_tokens,
+                    "seconds_elapsed": seconds_elapsed,
+                    "max_duration_seconds": max_duration_seconds,
+                    "repair_attempts_remaining": remaining,
+                },
+            ),
+            console_msg=(
+                f"\n{Fore.YELLOW}{Style.BRIGHT}[BUDGET] Stopping: {reason}{Style.RESET_ALL}\n"
+                f"  {Fore.LIGHTBLACK_EX}Tokens:{Style.RESET_ALL} {token_line}\n"
+                f"  {Fore.LIGHTBLACK_EX}Time:{Style.RESET_ALL}   {time_line}\n"
+                f"  {Fore.LIGHTBLACK_EX}Unused repair attempts:{Style.RESET_ALL} {remaining}\n"
+            ),
+        )
+
+    # ------------------------------------------------------------------
+    # Resuming a recorded run (Tier 1 #4)
+    # ------------------------------------------------------------------
+    def log_run_resumed(
+        self,
+        run_id: str,
+        completed_roles: Optional[List[str]] = None,
+        repair_attempts: int = 0,
+    ) -> None:
+        """Report which phases a resumed run is replaying rather than re-running."""
+        replayed = ", ".join(completed_roles or []) or "nothing"
+        self._emit(
+            WorkflowEvent(
+                name="run_resumed",
+                stage="context",
+                message=f"Resumed run {run_id}; replaying {replayed}",
+                status="info",
+                metadata={
+                    "run_id": run_id,
+                    "completed_roles": list(completed_roles or []),
+                    "repair_attempts": repair_attempts,
+                },
+            ),
+            console_msg=(
+                f"{Fore.CYAN}{Style.BRIGHT}[RESUME]{Style.RESET_ALL} Continuing run "
+                f"{run_id}\n"
+                f"  {Fore.LIGHTBLACK_EX}Replaying (not re-running):{Style.RESET_ALL} {replayed}\n"
+                f"  {Fore.LIGHTBLACK_EX}Repairs already spent:{Style.RESET_ALL} {repair_attempts}\n"
+            ),
+        )
+
+    def log_phase_replayed(self, role: str, agent: Optional[str] = None) -> None:
+        """Report that a phase was satisfied from the resumed run's history."""
+        self._emit(
+            WorkflowEvent(
+                name="phase_replayed",
+                stage=role,
+                role=role,
+                agent=agent,
+                message=f"Phase '{role}' replayed from the resumed run",
+                status="info",
+                metadata={"role": role, "replayed": True},
+            ),
+            console_msg=(
+                f"  {Fore.LIGHTBLACK_EX}[replay]{Style.RESET_ALL} {role} - "
+                f"reusing the recorded result, no agent launched\n"
             ),
         )
 

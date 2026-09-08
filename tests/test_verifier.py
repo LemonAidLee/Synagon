@@ -1,6 +1,7 @@
 """Unit and integration tests for the Claude Code Verifier integration."""
 
 import os
+import shutil
 import unittest
 from unittest.mock import patch, MagicMock
 
@@ -9,8 +10,15 @@ from orchestrator.agents.verifier import (
     run_verifier,
 )
 from orchestrator.prompts import build_verifier_prompt
-from orchestrator.graph import graph
+from orchestrator.config import DEFAULT_CONFIG
+from orchestrator.graph import build_graph
 from orchestrator.tracer import default_tracer
+
+from tests.support import (
+    isolated_graph_state,
+    redirected_run_store,
+    temporary_store_dir,
+)
 
 
 class TestVerifierUnit(unittest.TestCase):
@@ -108,11 +116,11 @@ class TestVerifierWorkflow(unittest.TestCase):
 
         initial_state = {
             "task": "Implement feature X and verify",
-            "project_root": os.getcwd(),
+            "project_root": os.getcwd(), "config": DEFAULT_CONFIG,
             "run_store_enabled": False,
             "workspace": {"isolated": False, "path": os.getcwd()},
         }
-        result = graph.invoke(initial_state)
+        result = build_graph(DEFAULT_CONFIG).invoke(initial_state)
 
         # Graph completes
         self.assertEqual(result["status"], "completed")
@@ -162,12 +170,12 @@ class TestVerifierWorkflow(unittest.TestCase):
 
         initial_state = {
             "task": "Implement feature Y and verify",
-            "project_root": os.getcwd(),
+            "project_root": os.getcwd(), "config": DEFAULT_CONFIG,
             "run_store_enabled": False,
             "workspace": {"isolated": False, "path": os.getcwd()},
             "max_repair_attempts": 0,
         }
-        result = graph.invoke(initial_state)
+        result = build_graph(DEFAULT_CONFIG).invoke(initial_state)
 
         # Graph completes with failed status when max_repair_attempts=0
         self.assertEqual(result["status"], "failed")
@@ -192,8 +200,14 @@ class TestVerifierWorkflow(unittest.TestCase):
         mock_opencode.return_value = "Mock implementation"
         mock_claude.side_effect = ["Mock plan", "VERDICT: PASS\nAll good."]
 
-        initial_state = {"task": "Verify trace sequence", "project_root": os.getcwd(), "workspace": {"isolated": False, "path": os.getcwd()}}
-        graph.invoke(initial_state)
+        # The run store stays enabled - the sequence asserted below names its events -
+        # but it is redirected, so the suite does not append a run to the developer's own
+        # project every time it runs. See tests/support.py.
+        store_dir = temporary_store_dir()
+        self.addCleanup(shutil.rmtree, store_dir, ignore_errors=True)
+        config = redirected_run_store(DEFAULT_CONFIG, store_dir)
+        initial_state = isolated_graph_state(DEFAULT_CONFIG, "Verify trace sequence", store_dir)
+        build_graph(config).invoke(initial_state)
 
         events = default_tracer.get_events()
         event_names = [e.name for e in events]

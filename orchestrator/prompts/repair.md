@@ -17,7 +17,7 @@ Repair Attempt: {repair_attempt} of {max_repair_attempts}
 ### PREVIOUS IMPLEMENTATION RESULT:
 {previous_implementation}
 
-### VERIFIER FEEDBACK & FINDINGS:
+{acceptance_section}### VERIFIER FEEDBACK & FINDINGS:
 {verifier_output}
 
 ### REPAIR INSTRUCTIONS (INSPECT FIRST):

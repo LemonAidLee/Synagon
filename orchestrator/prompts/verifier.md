@@ -18,7 +18,7 @@ Your responsibility: {responsibility}
 {previous_feedback_section}### IMPLEMENTER RESULT:
 {implementation_text}
 
-### VERIFICATION INSTRUCTIONS:
+{acceptance_section}### VERIFICATION INSTRUCTIONS:
 {reverification_note}1. Independently evaluate whether the implementation satisfies the original user task.
    Do NOT assume OpenCode's claims are correct without verifying the actual files.
 2. Inspect the project workspace and examine actual code modifications and tests.

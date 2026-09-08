@@ -18,6 +18,27 @@ from typing import Any, Dict, List, Optional
 DEFAULT_BRIDGE_URL = "http://127.0.0.1:49182"
 BRIDGE_PORT_FILE = os.path.expanduser(r"~/.antigravity-ide/terminal_bridge.json")
 
+#: Optional hook that lets something watch an agent's output live (Roadmap Phase 10).
+#:
+#: Called with the agent, role, model and command about to run; it returns a sink to feed
+#: output into as it arrives, or None to leave the execution exactly as it was. This is one
+#: hook in one place on purpose: no agent adapter and nothing in `graph.py` changes to gain a
+#: live terminal, and with nothing installed the headless path is byte-for-byte what it was.
+_output_recorder: Optional[Any] = None
+
+
+def set_output_recorder(recorder: Optional[Any]) -> Optional[Any]:
+    """Install (or clear, with None) the live-output hook. Returns the previous one."""
+    global _output_recorder
+    previous = _output_recorder
+    _output_recorder = recorder
+    return previous
+
+
+def get_output_recorder() -> Optional[Any]:
+    """The installed live-output hook, or None."""
+    return _output_recorder
+
 
 def get_antigravity_bridge_url() -> str:
     """Retrieve the URL of the running Antigravity IDE terminal bridge.
@@ -245,7 +266,10 @@ def run_agent_cli(
         Launches the agent in its own visible Windows terminal window, streams live
         stdout/stderr output to the terminal screen for user observation, captures
         the structured output and exit code, waits synchronously for completion,
-        and cleanly closes after the specified pause.
+        and cleanly closes after the specified pause. Overridden when an output recorder
+        is installed (`set_output_recorder`, used by the daemon): the captured, relayed
+        path is used instead, since the daemon already gives the output a place to be
+        watched and a second, separate window would be a disconnected duplicate.
 
     Args:
         cmd: List of command arguments.
@@ -274,9 +298,51 @@ def run_agent_cli(
 
     working_dir = cwd or os.getcwd()
 
-    if not visible:
-        # Headless execution
+    recorder = _output_recorder
+    # A separate OS window and a captured, relayed stream are two ways of showing the same
+    # thing to a person; when a recorder is installed (running under the daemon), the
+    # captured path wins even if the caller asked for `visible=True` - the daemon already
+    # gives that output somewhere to be watched (the cockpit's terminal panel), and a real
+    # console window besides it would only be a second, disconnected copy. This is what
+    # actually eliminates the popup windows under `--daemon`; nothing changes for a plain
+    # `python -m orchestrator` invocation, which has no recorder and keeps opening one.
+    if not visible or recorder is not None:
+        # Headless execution. When something has asked to watch this agent's output live
+        # (the daemon, Roadmap Phase 10), the same command runs through a captured pipe that
+        # publishes each chunk as it arrives and returns the identical result; with no
+        # recorder installed this is the plain `subprocess.run` it has always been.
+        sink = None
+        if recorder is not None:
+            try:
+                sink = recorder(agent=agent, role=role, model=model, cmd=cmd, cwd=working_dir)
+            except Exception:
+                sink = None
+
         t0 = time.time()
+        if sink is not None:
+            from orchestrator.terminals import run_captured
+
+            stream = getattr(sink, "stream", None)
+            try:
+                captured = run_captured(cmd, cwd=working_dir, timeout=timeout, sink=sink)
+            except subprocess.TimeoutExpired as exc:
+                if stream is not None:
+                    stream.close(None)
+                raise CLITimeoutError(
+                    f"Agent CLI command timed out after {timeout} seconds",
+                    timeout=timeout,
+                    command=cmd,
+                ) from exc
+            if stream is not None:
+                stream.close(captured.returncode)
+            return ExecutionResult(
+                returncode=captured.returncode,
+                stdout=captured.stdout,
+                stderr=captured.stderr,
+                duration_seconds=captured.duration_seconds,
+                command=cmd,
+            )
+
         try:
             res = subprocess.run(
                 cmd,

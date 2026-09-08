@@ -15,8 +15,21 @@
 # Active Agent Assignments
 # ------------------------------------------------------------------------------
 agents:
-  - agent: antigravity
-    model: gemini-3.8-flash-high
+  # The researcher was `antigravity / gemini-3.8-flash-high` until 2026-09-08. It was moved
+  # because of measured behaviour, not preference: asked to *investigate a project* - which is
+  # precisely this role's job - the Antigravity CLI returns `status: SUCCESS` with an EMPTY
+  # response string, having spent its whole output budget on thinking tokens. It answers small
+  # prompts fine, so `--doctor` passes and nothing looks wrong until a run dies.
+  #
+  # That single failure was 7 of 7 real end-to-end failures this project ever recorded, and
+  # retrying cannot fix it because it is deterministic, not flaky (6 consecutive attempts, 6
+  # empty replies). `--stats` shows claude/sonnet has filled this role 20 times here with a 0%
+  # error rate, so this is the evidence-based swap rather than a guess.
+  #
+  # To put Antigravity back, restore the two lines below - and give it a model ladder, so
+  # `execution.retry.escalate_model` has somewhere to escalate to.
+  - agent: claude
+    model: sonnet
     role: researcher
 
   - agent: claude
@@ -50,11 +63,40 @@ max_repair_attempts: 2
 # agent_execution_mode: auto    # "auto" (prefer native TUI where supported, headless fallback),
 #                               # "native_tui" (strictly require native TUI),
 #                               # "headless" (standard non-interactive CLI mode)
+#
+# SURVIVING A FLAKY AGENT (execution.retry)
+#
+# A local CLI agent is a subprocess over a network service, and it fails the way
+# those fail: intermittently, and by returning NOTHING rather than by raising.
+# Before this existed the pipeline halted on the first such failure, which made a
+# whole run only as reliable as its flakiest single call - and in this project's
+# own recorded history, every real end-to-end failure was exactly that: one empty
+# researcher reply on step one, with no second attempt.
+#
+#   attempts             Total tries per execution. 1 disables retrying and
+#                        restores the pre-retry behaviour exactly. Max 10 - this
+#                        is insurance against a flaky call, not a way to hammer a
+#                        service that is down.
+#   backoff_seconds      Base delay before a retry, doubled each time.
+#   max_backoff_seconds  Ceiling on that doubling.
+#   escalate_model       When an agent's `model:` is an escalation ladder, step
+#                        down it on each retry instead of repeating the model that
+#                        just returned nothing.
+#
+# However many attempts one execution takes, the phase still produces ONE result:
+# a retry is not an ensemble, and consensus and --stats both count results. The
+# attempts that failed are recorded as their own `agent_retry` events instead, so
+# a retry is auditable rather than invisible.
 execution:
   visible_terminals: true
   terminal_type: antigravity_integrated
   pause_on_completion: 1.5
   agent_execution_mode: auto
+  retry:
+    attempts: 3
+    backoff_seconds: 2.0
+    max_backoff_seconds: 30.0
+    escalate_model: true
 
 # ------------------------------------------------------------------------------
 # Global Skill Discovery & Access Configuration (Stage 7.7)
@@ -106,8 +148,14 @@ preflight:
 #
 # Store failures never fail a run; they degrade to a warning.
 #
-# List runs:  python -m orchestrator --runs
-# Show one:   python -m orchestrator --show-run latest
+# List runs:   python -m orchestrator --runs
+# Show one:    python -m orchestrator --show-run latest
+# Resume one:  python -m orchestrator --resume latest
+#              Phases the run already completed are replayed from its event log
+#              instead of being paid for a second time.
+# Analyze all: python -m orchestrator --stats [--json]
+#              Pass rates by agent/model/role, what a pass costs against a
+#              failure, whether repair attempts and ensembles earn their price.
 # ------------------------------------------------------------------------------
 run_store:
   enabled: true
@@ -128,18 +176,26 @@ run_store:
 #   directory         Worktrees directory, relative to project root or absolute.
 #   commit_on_finish  Commit the run's changes onto its branch when the run ends,
 #                     so the work survives worktree cleanup and reads as a diff.
-#   keep_worktree     Leave the worktree on disk after the run.
+#   keep_worktree     Leave the checkout on disk after the run. Off by default:
+#                     once the work is committed, the BRANCH is the artifact and
+#                     the worktree is a second full copy of your project. A dirty
+#                     worktree is kept regardless - then it IS the only copy.
 #
 # The orchestrator never merges automatically and never force-deletes a worktree
 # holding uncommitted work.
 #
 # Override per run:  --isolate worktree | --isolate none | --no-isolate
+#                    --keep-worktree
+#
+# Branches accumulate on purpose (they hold the work). Sweep old ones with:
+#   python -m orchestrator --prune-runs --older-than 30d --keep-failed
+#   python -m orchestrator --prune-runs --dry-run       # preview, delete nothing
 # ------------------------------------------------------------------------------
 workspace:
   isolation: auto
   directory: .orchestrator/worktrees
   commit_on_finish: true
-  keep_worktree: true
+  keep_worktree: false
 
 # ------------------------------------------------------------------------------
 # Verification Consensus (Tier 2 #8)
@@ -155,9 +211,247 @@ workspace:
 #
 # A BLOCKED verdict from any verifier always wins: if one says a human is
 # needed, that is true regardless of what the others concluded.
+#
+# ------------------------------------------------------------------------------
+# The Objective Acceptance Gate (Roadmap Phase 0)
+# ------------------------------------------------------------------------------
+# Without this, every PASS in this system is a model's opinion about whether your
+# tests pass. The gate is a command the ORCHESTRATOR runs itself, in the run's
+# worktree, immediately before the verifier - so the verifier is handed evidence
+# instead of being asked to produce it, and a failing repair gets the real error
+# output instead of a paraphrase of it.
+#
+#   command          What to run. A string ('pytest -q') or a list
+#                    (['python', '-m', 'pytest', '-q']). Empty disables the gate.
+#                    Never run through a shell.
+#   timeout_seconds  Seconds before the command is killed.
+#   required         true  - a red gate overrides a verifier's PASS (verdict: FAIL)
+#                    false - the result is recorded and shown, but decides nothing
+#   output_limit     Characters of output kept and shown to agents (tail-weighted).
+#
+# The command is read from YOUR checkout, never from the worktree the agents can
+# edit, so an agent cannot rewrite the command that judges it. A gate that cannot
+# run - missing binary, timeout, crash - is recorded as a failure, never as a pass.
+#
+# Override per run:  --acceptance-command "pytest -q" | --no-acceptance
 # ------------------------------------------------------------------------------
 verification:
   consensus: unanimous
+  acceptance:
+    command: ""
+    timeout_seconds: 600
+    required: true
+    output_limit: 4000
+
+# ------------------------------------------------------------------------------
+# Goal Decomposition (Roadmap Phase 1)
+# ------------------------------------------------------------------------------
+# Breaks one goal into a graph of focused, independently deliverable tasks, each
+# of which could later be given to its own agent in its own workspace.
+#
+#   agent      Which provider decomposes. Omitted = whoever holds the planner role.
+#   model      Which model it uses. Omitted = the planner's model, when the agent
+#              matches (a model id means nothing across providers).
+#   max_tasks  Ceiling on tasks in one plan. A decomposer that emits work is a loop
+#              generator; this is its bound.
+#
+# The decomposer is deliberately NOT an entry in `agents:` above - it runs before a
+# pipeline, not inside one, so an ordinary run never pays for a decomposition it
+# did not ask for.
+#
+# Plan a goal without implementing anything:
+#   python -m orchestrator "<goal>" --plan-only
+#   python -m orchestrator "<goal>" --plan-only --json
+# ------------------------------------------------------------------------------
+# THE PLANNER'S MEMORY (Roadmap 8.2)
+#
+# Without it, every goal is decomposed COLD: the decomposer sees the project
+# context and the goal text, and nothing of what happened here before. With it,
+# its prompt also carries what previous goals recorded - which files sibling
+# tasks fought over, where work in this repository actually lands, what a task
+# cost, and what a person rejected at a gate and why.
+#
+#   enabled       Off returns the cold decomposition. Default: true.
+#   max_goals     How far back to read. A decomposition from two hundred goals
+#                 ago describes a repository that no longer exists.
+#   budget_chars  The ceiling on what the memory may add to the prompt. It is
+#                 filled with the most actionable sections first and says when it
+#                 dropped one, so a growing history can never become the reason a
+#                 prompt does not fit.
+#
+# It is a PROJECTION over the goal, run and approval stores - not a new store, and
+# not something a run writes to. Read exactly what the decomposer will be told:
+#   python -m orchestrator --memory
+#   python -m orchestrator --memory --plan-only     # the prompt block itself
+#   python -m orchestrator --memory --json
+# ------------------------------------------------------------------------------
+planning:
+  max_tasks: 12
+  memory:
+    enabled: true
+    max_goals: 12
+    budget_chars: 2400
+
+# ------------------------------------------------------------------------------
+# Run Budget (Tier 2 #11)
+# ------------------------------------------------------------------------------
+# max_repair_attempts bounds how many attempts a run makes. It says nothing about
+# what those attempts cost. With a model escalation ladder configured, one task
+# can put three agents through three attempts, each more expensive than the last.
+# These are the ceiling that ladder assumes exists.
+#
+#   max_total_tokens      Stop escalating once the run has spent this many tokens.
+#   max_duration_seconds  Stop escalating once the run has been going this long.
+#
+# 0 means unlimited (the default: a ceiling you did not choose is a surprise).
+# Both are checked where the decision to fund another repair is made, never
+# mid-execution: a ceiling cannot un-spend a call already in flight, and killing
+# an agent halfway wastes everything it has already cost. A run that stops this
+# way ends with status `budget_exhausted`, distinct from `failed`.
+#
+# Spend is measured from token counts agents actually reported. An execution that
+# reports no usage counts as zero, so it can never fabricate an overrun.
+#
+# Override per run:  --max-total-tokens 200000 --max-duration-seconds 1800
+# ------------------------------------------------------------------------------
+# The goal_ pair bound a whole DELEGATED GOAL - every session its tasks run, added
+# up - because a decomposition otherwise multiplies the per-session ceiling above by
+# however many tasks it happened to emit. They are checked between waves, so a task
+# already in flight is never killed mid-way.
+budget:
+  max_total_tokens: 0
+  max_duration_seconds: 0
+  goal_max_total_tokens: 0
+  goal_max_duration_seconds: 0
+
+# ------------------------------------------------------------------------------
+# Delegation (Roadmap Phases 2-3)
+# ------------------------------------------------------------------------------
+# How a decomposed goal is carried out: one session per task, in dependency order,
+# each in its own git worktree on its own branch.
+#
+#   max_parallel     How many tasks may have a session in flight at once. 1 runs them
+#                    one at a time; there is one scheduler either way. Parallelism
+#                    means several agents writing several worktrees simultaneously, so
+#                    it is opt-in rather than something you discover after the fact.
+#   stop_on_failure  Abandon the remaining tasks once any task fails. Off by default:
+#                    a failure stops the tasks that depended on it, and no others.
+#   goals_directory  Goal store directory, relative to project root or absolute.
+#
+# A task with dependencies starts from its dependency's branch, with any further
+# dependencies merged forward into its fresh worktree - a dependency its dependent
+# cannot see is not a dependency. A conflict there is never guessed at: that task
+# stops and asks for a person.
+#
+# Nothing is ever merged back. A goal produces one branch per delivered task plus a
+# report; sibling tasks that changed the same file are reported as a collision.
+#
+#   python -m orchestrator "<goal>" --delegate
+#   python -m orchestrator "<goal>" --delegate --parallel 3
+#   python -m orchestrator --goals
+#   python -m orchestrator --show-goal latest
+# ------------------------------------------------------------------------------
+delegation:
+  max_parallel: 1
+  stop_on_failure: false
+  goals_directory: .orchestrator/goals
+
+# ------------------------------------------------------------------------------
+# Approval Gates (Roadmap Phase 5)
+# ------------------------------------------------------------------------------
+# BLOCKED is the verifier DISCOVERING that a human is needed. A gate is you saying
+# so in advance: stop here and ask, whatever the agents think.
+#
+#   after_decomposition  The plan is produced and recorded, then every task waits.
+#                        Read the decomposition before a team acts on it.
+#   before_task          Authorise each task individually. A held task does not
+#                        block its siblings - only what depends on it waits.
+#   before_merge         Never blocks anything: the work is already done and on its
+#                        branch. It decides whether the board shows that card as
+#                        "In Review" or "Ready to Merge". The cheapest gate to turn
+#                        on, and the one that turns a pile of branches into a queue.
+#
+#   auto_approve         Answer every gate automatically. The gate still happens and
+#                        the record says it was auto-approved: a guardrail you cannot
+#                        tell was on is not a guardrail.
+#
+# A gate never blocks a process waiting for a keystroke - a run that hangs on stdin
+# cannot be scheduled, watched, or resumed, and the person may not be there. It
+# records a pending approval and stops at a clean boundary:
+#
+#   python -m orchestrator --approvals                  # what is waiting
+#   python -m orchestrator --approve <id> --note "..."  # clear it
+#   python -m orchestrator --reject <id> --note "..."   # refuse it
+#   python -m orchestrator --resume-goal <goal id>      # carry on
+#
+# Watch it all happen:
+#   python -m orchestrator --board      # cards in columns, derived from facts
+#   python -m orchestrator --serve      # the same board, plus the office view
+# ------------------------------------------------------------------------------
+approval:
+  gates:
+    after_decomposition: false
+    before_task: false
+    before_merge: false
+  auto_approve: false
+  directory: .orchestrator/approvals
+
+# ------------------------------------------------------------------------------
+# Outward Delivery (Roadmap Phase 6)
+# ------------------------------------------------------------------------------
+# Everything a run produces stays on a LOCAL branch. This section is the only way
+# anything reaches a remote, and it is off until you turn it on.
+#
+#   NEVER AUTO-PUSH. A branch crosses the network when a person says so, and never
+#   because a verifier said PASS. That is the never-auto-merge rule in network form.
+#
+#   enabled      Nothing is pushed while this is false, whatever anyone approves.
+#   remote       The git remote to push to.
+#   base         Pull request base branch. Empty means the remote's default branch.
+#   draft        Open pull requests as drafts. On by default: the first thing a
+#                reviewer should see is that a machine wrote it and a human has
+#                not finished with it.
+#   on_approve   Approving a `before_merge` gate delivers the work. Turn this off
+#                to keep the gate and require an explicit --deliver as well.
+#   directory    Delivery records directory, relative to project root or absolute.
+#
+# The forge is driven through `gh`, your own locally-authenticated CLI. This
+# project reads, stores, and transmits no API key of any kind. Without `gh` the
+# branch is still pushed and the pull request is not - and the record says so.
+#
+#   python -m orchestrator --board                # what is Ready to Merge
+#   python -m orchestrator --deliver <card>       # push it, open a pull request
+#   python -m orchestrator --deliveries           # what has been published
+#   python -m orchestrator --refresh-deliveries   # re-read CI and review state
+#
+# The board shows RECORDED CI and review facts, never live ones: a projection that
+# phoned a forge would be slow, would fail offline, and would make reading a board
+# an act with consequences. Every card says how fresh its facts are.
+# ------------------------------------------------------------------------------
+delivery:
+  enabled: false
+  remote: origin
+  base: ""
+  draft: true
+  on_approve: true
+  directory: .orchestrator/delivery
+
+# ------------------------------------------------------------------------------
+# The Design Surface (Roadmap Phase 7)
+# ------------------------------------------------------------------------------
+# This file IS the team model, so the node editor is a view over it rather than a
+# second description of the same thing. It has no configuration of its own.
+#
+#   python -m orchestrator --teams                # the team, and the templates
+#   python -m orchestrator --apply-team careful   # start from a template
+#   python -m orchestrator --design               # compose one visually
+#
+# --design is the only server in this project that can write, and it writes
+# exactly three things in this file: the `agents:` block above, the
+# `max_repair_attempts` value, and `verification.consensus`. Every other byte -
+# including every comment you are reading - is left alone, the result is validated
+# before it lands, and the previous version is kept as orchestrator.yaml.bak-<stamp>.
+# --serve stays read-only.
 
 
 # ------------------------------------------------------------------------------
@@ -241,6 +535,13 @@ models:
 # Role Definitions & Responsibilities
 # ------------------------------------------------------------------------------
 roles:
+  decomposer:
+    responsibility: >-
+      Break the user's goal into the smallest set of focused, independently
+      deliverable tasks, with explicit dependencies, the areas each task is
+      expected to touch, and how each one would be judged done. Plan only:
+      never implement.
+
   researcher:
     responsibility: >-
       Investigate and analyze the supplied project context and user task.

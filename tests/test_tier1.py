@@ -31,7 +31,7 @@ from orchestrator.config import (
     load_config,
     validate_config,
 )
-from orchestrator.graph import graph, should_repair_or_end
+from orchestrator.graph import build_graph, should_repair_or_end
 from orchestrator.preflight import (
     format_preflight_report,
     probe_agent,
@@ -446,8 +446,26 @@ class TestPreflight(unittest.TestCase):
         mock_run.assert_not_called()
 
     def test_deep_mode_probes_each_binary_once(self):
-        """Two roles share the claude binary; it must be version-probed only once."""
-        config = load_config(None, os.getcwd())
+        """Two roles share the claude binary; it must be version-probed only once.
+
+        Built from a fixture rather than from `load_config(os.getcwd())`, which made this a
+        test about whatever team this project happens to be configured with today - it broke
+        the moment the researcher was reassigned to a provider already in the pipeline. What
+        it exists to prove is de-duplication by binary, so the fixture states the case it is
+        about: four agent entries over three distinct binaries.
+        """
+        config = validate_config({
+            "agents": [
+                {"agent": "antigravity", "model": "gemini-3.8-flash-high", "role": "researcher"},
+                {"agent": "claude", "model": "sonnet", "role": "planner"},
+                {"agent": "opencode", "model": "opencode/gpt-5.1-codex", "role": "implementer"},
+                {"agent": "claude", "model": "sonnet", "role": "verifier"},
+            ],
+            "roles": {
+                r: {"responsibility": r}
+                for r in ("researcher", "planner", "implementer", "verifier")
+            },
+        })
 
         class Completed:
             returncode = 0
@@ -608,6 +626,7 @@ class TestTier1Integration(unittest.TestCase):
         state = {
             "task": "Tier 1 integration",
             "project_root": os.getcwd(),
+            "config": validate_config(BASE_CONFIG),
             "run_store_enabled": False,
             "agent_results": [],
             # Pin the workspace so these tests never create a real git worktree.
@@ -619,10 +638,10 @@ class TestTier1Integration(unittest.TestCase):
         with patch.object(graph_module, "run_antigravity", return_value="analysis"), \
              patch.object(graph_module, "run_claude_code", side_effect=claude_outputs), \
              patch.object(graph_module, "run_opencode", return_value="implementation"):
-            return graph.invoke(state)
+            return build_graph(validate_config(BASE_CONFIG)).invoke(state)
 
     def test_graph_contains_preflight_and_finalize_nodes(self):
-        nodes = set(graph.get_graph().nodes)
+        nodes = set(build_graph(validate_config(BASE_CONFIG)).get_graph().nodes)
         self.assertIn("preflight", nodes)
         self.assertIn("finalize", nodes)
 
@@ -674,10 +693,11 @@ class TestTier1Integration(unittest.TestCase):
              patch.object(graph_module, "run_antigravity") as agy, \
              patch.object(graph_module, "run_claude_code") as claude, \
              patch.object(graph_module, "run_opencode") as oc:
-            result = graph.invoke(
+            result = build_graph(validate_config(BASE_CONFIG)).invoke(
                 {
                     "task": "should not run",
                     "project_root": os.getcwd(),
+                    "config": validate_config(BASE_CONFIG),
                     "run_store_enabled": False,
                     "agent_results": [],
                     "workspace": {"isolated": False, "path": os.getcwd()},
@@ -705,6 +725,7 @@ class TestTier1Integration(unittest.TestCase):
         state = {
             "task": "record me",
             "project_root": self.tmp,
+            "config": validate_config(BASE_CONFIG),
             "agent_results": [],
             "workspace": {"isolated": False, "path": self.tmp},
         }
@@ -716,7 +737,7 @@ class TestTier1Integration(unittest.TestCase):
                  {"antigravity": lambda: "a", "claude": lambda: "c", "opencode": lambda: "o"},
                  clear=True,
              ):
-            result = graph.invoke(state)
+            result = build_graph(validate_config(BASE_CONFIG)).invoke(state)
 
         self.assertIsNotNone(result.get("run_id"))
         run = load_run(self.tmp, result["run_id"])

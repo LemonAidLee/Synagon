@@ -16,19 +16,33 @@ from orchestrator.agents.verifier import (
     is_repairable,
     parse_verdict,
 )
+from orchestrator.decompose import parse_task_plan
 from orchestrator.prompts import (
+    build_decomposer_prompt,
     build_implementer_prompt,
     build_planner_prompt,
     build_researcher_prompt,
     build_verifier_prompt,
     build_repair_prompt,
 )
+from orchestrator.acceptance import (
+    format_for_prompt as format_acceptance_for_prompt,
+    describe_check,
+    latest_check,
+    parse_command,
+    run_acceptance,
+)
+from orchestrator.budget import evaluate_budget
 from orchestrator.config import (
     OrchestratorConfig,
     load_config,
+    get_acceptance_config,
     get_agent_config,
     get_role_responsibility,
+    get_budget_config,
     get_consensus_policy,
+    get_planning_config,
+    get_retry_config,
     get_max_repair_attempts,
     get_visible_terminals,
     get_execution_config,
@@ -45,6 +59,7 @@ from orchestrator.preflight import (
     run_preflight,
     skipped_report,
 )
+from orchestrator.resume import should_replay
 from orchestrator.skills.types import SkillInfo
 from orchestrator.skills.discovery import discover_skills
 from orchestrator.skills.registry import format_skill_manifest
@@ -62,7 +77,10 @@ from orchestrator.workspace import (
     WorkspaceInfo,
     commit_worktree,
     create_run_worktree,
+    describe_retention,
     describe_workspace,
+    finish_worktree,
+    merge_refs_into_worktree,
     summarize_worktree,
 )
 from orchestrator.tracer import default_tracer
@@ -116,6 +134,25 @@ class OrchestratorState(TypedDict, total=False):
     workspace_summary: Optional[dict]
     # Tier 2 #8 - verifier consensus policy
     consensus_policy: Optional[str]
+    # Tier 2 #11 - run budget: the ceiling the escalation ladder spends against
+    budget: Optional[dict]
+    budget_state: Optional[dict]
+    budget_exhausted_reason: Optional[str]
+    run_started_at: Optional[float]
+    # Tier 1 #4 - resume: facts replayed from a previous run's event log
+    resumed_from: Optional[str]
+    # Phase 0 - objective acceptance gate: a command the orchestrator ran itself
+    acceptance_checks: Annotated[List[Dict[str, Any]], add]
+    acceptance_required: Optional[bool]
+    # Phase 1 - goal decomposition
+    task_plan: Optional[dict]
+    plan_only: Optional[bool]
+    # Phases 2-3 - this session is one task of a delegated goal
+    goal_id: Optional[str]
+    task_id: Optional[str]
+    workspace_base_ref: Optional[str]      # branch or commit this session starts from
+    workspace_merge_refs: Optional[list]   # dependency branches merged in before any agent runs
+    workspace_merge: Optional[dict]        # what that merge did
     # Derived at read time; written only by finalize_node (Tier 1 #5)
     status: str
     summary: Optional[dict]
@@ -156,8 +193,12 @@ def _prepare_workspace(
     config: OrchestratorConfig,
     project_root: str,
     run_id: Optional[str],
+    base_ref: Optional[str] = None,
 ) -> WorkspaceInfo:
     """Resolve the workspace this run executes in (Tier 0 #3).
+
+    `base_ref` is what a delegated task uses to start from its dependency's branch instead of
+    the current HEAD (Roadmap Phase 2).
 
     Returns an un-isolated workspace pointing at the project root when isolation
     is switched off, or when git cannot provide it. This never raises.
@@ -178,7 +219,12 @@ def _prepare_workspace(
     # Isolation must not depend on the run store being enabled, so mint an id
     # for the worktree when there isn't one.
     identifier = run_id or generate_run_id()
-    return create_run_worktree(project_root, identifier, directory=ws_cfg.get("directory"))
+    return create_run_worktree(
+        project_root,
+        identifier,
+        directory=ws_cfg.get("directory"),
+        base_ref=base_ref,
+    )
 
 
 def context_node(state: OrchestratorState) -> OrchestratorState:
@@ -235,6 +281,16 @@ def context_node(state: OrchestratorState) -> OrchestratorState:
                 directory=store_cfg.get("directory"),
                 max_output_chars=max_output_chars,
                 max_repair_attempts=max_repairs,
+                # Recorded so `--stats` can compare outcomes across settings,
+                # not merely count runs.
+                settings={
+                    "consensus": get_consensus_policy(config),
+                    "isolation": get_workspace_config(config).get("isolation"),
+                    "budget": dict(get_budget_config(config)),
+                    "agent_execution_mode": str(agent_exec_mode),
+                },
+                goal_id=state.get("goal_id"),
+                task_id=state.get("task_id"),
             )
             if store is not None:
                 run_id = store.run_id
@@ -249,17 +305,44 @@ def context_node(state: OrchestratorState) -> OrchestratorState:
         # Tier 0 #3 - isolate the run in its own git worktree when possible, so
         # the implementer and its repairs never write the user's checkout.
         workspace = state.get("workspace")
+        merge_outcome = state.get("workspace_merge")
         if workspace is None:
-            workspace = _prepare_workspace(config, root, run_id)
+            workspace = _prepare_workspace(
+                config, root, run_id, base_ref=state.get("workspace_base_ref")
+            )
             if workspace.get("isolated"):
                 default_tracer.log_workspace_isolated(
                     workspace.get("path", ""), workspace.get("branch", "")
                 )
+                # A delegated task is built on its dependencies' work, so their branches are
+                # merged into this fresh worktree before any agent sees it (Phase 2). A
+                # conflict is never guessed at: the run stops and a person is asked.
+                merge_refs = [str(r) for r in (state.get("workspace_merge_refs") or []) if r]
+                if merge_refs:
+                    merge_outcome = merge_refs_into_worktree(workspace, merge_refs)
+                    default_tracer.log_dependency_merge(
+                        merged=list(merge_outcome.get("merged") or []),
+                        conflicted=list(merge_outcome.get("conflicted") or []),
+                        error=merge_outcome.get("error"),
+                    )
             else:
                 default_tracer.log_workspace_not_isolated(workspace.get("reason") or "unknown")
             store = _get_store({"run_dir": run_dir, "run_store_max_output_chars": max_output_chars})
             if store is not None:
                 store.record_event("workspace", workspace=workspace)
+                if merge_outcome:
+                    store.record_event("dependency_merge", merge=merge_outcome)
+
+        if isinstance(merge_outcome, dict) and merge_outcome.get("conflicted"):
+            return {
+                "workspace": workspace,
+                "workspace_merge": merge_outcome,
+                "error": (
+                    "the task's dependencies could not be merged into one workspace: "
+                    f"{merge_outcome.get('error')}. Nothing was guessed at; reconcile "
+                    f"{', '.join(merge_outcome.get('conflicted') or [])} by hand."
+                ),
+            }
 
         ws_cfg = get_workspace_config(config)
         if ws_cfg.get("isolation") == "worktree" and not workspace.get("isolated"):
@@ -289,7 +372,15 @@ def context_node(state: OrchestratorState) -> OrchestratorState:
             "pause_on_completion": float(pause_secs),
             "agent_execution_mode": str(agent_exec_mode),
             "consensus_policy": state.get("consensus_policy") or get_consensus_policy(config),
+            # A run's cost ceiling and the clock it is measured against. Seeded
+            # once here so every later decision reads the same numbers.
+            "budget": state.get("budget") or dict(get_budget_config(config)),
+            "run_started_at": state.get("run_started_at") or time.time(),
+            # Whether a red gate can override a verifier's PASS is a policy, and it travels
+            # with the run so `derive_verdict` can apply it without loading config.
+            "acceptance_required": bool(get_acceptance_config(config).get("required", True)),
             "workspace": workspace,
+            "workspace_merge": merge_outcome,
             "run_id": run_id,
             "run_dir": run_dir,
             "run_store_enabled": bool(store_enabled),
@@ -372,8 +463,17 @@ def _join_role_outputs(existing_results: List[AgentResult], role: str) -> str:
     return "\n\n".join(joined)
 
 
-def make_role_node(role_name: str, agent_index: Optional[int] = None, is_repair: bool = False):
-    """Factory to create a generalized agent execution node for a given role."""
+def make_role_node(
+    role_name: str,
+    agent_index: Optional[int] = None,
+    is_repair: bool = False,
+    agent_override: Optional[Dict[str, Any]] = None,
+):
+    """Factory to create a generalized agent execution node for a given role.
+
+    `agent_override` supplies an agent entry that is not part of the `agents:` pipeline - the
+    decomposer, which runs before a pipeline rather than inside one.
+    """
     def role_node(state: OrchestratorState) -> OrchestratorState:
         # Guard on the error *fact*, not on a stored status string (Tier 1 #5).
         if has_error(state):
@@ -384,7 +484,9 @@ def make_role_node(role_name: str, agent_index: Optional[int] = None, is_repair:
         # In repair mode, we still assume the implementer role is doing the repair
         cfg_role = "implementer" if is_repair else role_name
         
-        if agent_index is not None:
+        if agent_override is not None:
+            agent_cfg = dict(agent_override)
+        elif agent_index is not None:
             agents = config.get("agents", [])
             agent_cfg = agents[agent_index] if agent_index < len(agents) else {}
         else:
@@ -400,13 +502,25 @@ def make_role_node(role_name: str, agent_index: Optional[int] = None, is_repair:
         existing_results = list(state.get("agent_results") or [])
         repair_attempts = state.get("repair_attempts", 0)
 
+        # Tier 1 #4 - a resumed run replays the work the original already
+        # produced rather than paying for it twice. The repair node still has to
+        # advance the attempt counter it is replaying, or the loop would route
+        # straight back into the same replay.
+        if should_replay(state, role_name, is_repair=is_repair, repair_attempts=repair_attempts):
+            default_tracer.log_phase_replayed(role_name, agent=agent_name)
+            return {"repair_attempts": repair_attempts + 1} if is_repair else {}
+
         # A model may be an escalation ladder: rung 0 for the initial attempt,
         # rung N for repair attempt N. A repair node is executing attempt
         # `repair_attempts + 1`, so it must escalate now rather than repeat the
         # model that just failed.
-        if isinstance(model_name, list):
-            attempt_index = (repair_attempts + 1) if is_repair else 0
-            model_name = model_name[min(attempt_index, len(model_name) - 1)]
+        model_ladder = list(model_name) if isinstance(model_name, list) else None
+        ladder_rung = 0
+        if model_ladder:
+            ladder_rung = min(
+                (repair_attempts + 1) if is_repair else 0, len(model_ladder) - 1
+            )
+            model_name = model_ladder[ladder_rung]
         task = state.get("task") or state.get("message", "")
         project_context = state.get("project_context", "(No project context supplied)")
         # Agents execute in the run's isolated worktree when there is one.
@@ -430,6 +544,12 @@ def make_role_node(role_name: str, agent_index: Optional[int] = None, is_repair:
             verification_history = state.get("verification_history", [])
             verifier_output = verification_history[-1]["output"] if verification_history else ""
 
+            # The gate's own failure output is the most useful thing a repair can be given:
+            # a real stack trace beats the verifier's summary of one.
+            acceptance_section = format_acceptance_for_prompt(
+                latest_check(state.get("acceptance_checks"), repair_attempts - 1)
+            )
+
             prompt = build_repair_prompt(
                 task=task,
                 project_context=project_context,
@@ -441,6 +561,7 @@ def make_role_node(role_name: str, agent_index: Optional[int] = None, is_repair:
                 responsibility=responsibility,
                 role_name=cfg_role,
                 skill_manifest=skill_manifest,
+                acceptance_section=acceptance_section,
             )
             default_tracer.log_repair_start(
                 attempt=repair_attempts,
@@ -504,8 +625,42 @@ def make_role_node(role_name: str, agent_index: Optional[int] = None, is_repair:
                 responsibility=responsibility, role_name=role_name,
                 verification_attempt=verification_attempt, repair_attempts_completed=repair_attempts,
                 previous_verifier_output=previous_verifier_output, skill_manifest=skill_manifest,
+                acceptance_section=format_acceptance_for_prompt(
+                    latest_check(state.get("acceptance_checks"), repair_attempts)
+                ),
             )
             term_title = get_terminal_title(agent_name, role_name, verification_attempt=verification_attempt)
+        elif role_name == "decomposer":
+            # Roadmap 8.2: the decomposer is the one role whose prompt carries what previous
+            # goals recorded. Building it never fails a run - `memory_section` returns "" on
+            # any problem, and "" is the cold prompt this had before it had a memory.
+            planning_cfg = get_planning_config(config)
+            memory_cfg = planning_cfg.get("memory") or {}
+            memory_text = ""
+            if memory_cfg.get("enabled", True):
+                from orchestrator.memory import memory_section
+
+                memory_text = memory_section(
+                    str(state.get("project_root") or ""),
+                    config,
+                    max_goals=int(memory_cfg.get("max_goals", 12)),
+                    budget_chars=int(memory_cfg.get("budget_chars", 2400)),
+                )
+
+            prompt = build_decomposer_prompt(
+                role_name=role_name,
+                responsibility=responsibility,
+                project_context=project_context,
+                task=task,
+                skill_manifest=skill_manifest,
+                max_tasks=int(planning_cfg.get("max_tasks", 12)),
+                memory=memory_text,
+            )
+            default_tracer.log_agent_start(
+                agent=agent_name, role=role_name, model=model_name, step_label="[2/3]",
+                title=agent_name.capitalize(), action="Breaking the goal into tasks...",
+            )
+            term_title = get_terminal_title(agent_name, role_name)
         else:
             # Fallback for dynamic roles
             prompt = f"Role: {role_name}\nResponsibility: {responsibility}\nTask: {task}\nContext:\n{project_context}"
@@ -518,39 +673,135 @@ def make_role_node(role_name: str, agent_index: Optional[int] = None, is_repair:
         start_time = time.time()
         runner = get_runner(agent_name)
 
-        try:
-            kwargs = {
-                "working_dir": project_root,
-                "model": model_name,
-                "visible": visible,
-                "title": term_title,
-                "role": role_name,
-                "terminal_type": term_type,
-                "pause_on_completion": pause_secs,
-                "tracer": default_tracer,
-                "agent_execution_mode": agent_exec_mode,
-                "return_usage": True,
-            }
-            if runner == run_opencode:
-                kwargs["return_execution_mode"] = True
+        # An execution beginning is a fact too, and the only one that tells a reader who is
+        # working right now rather than who has already finished.
+        store = _get_store(state)
+        if store is not None:
+            store.record_agent_started(
+                agent=agent_name,
+                role=role_name,
+                model=model_name,
+                repair_attempt=repair_attempts if is_repair else None,
+            )
 
-            raw_res = runner(prompt, **kwargs)
-            duration = round(time.time() - start_time, 2)
+        # A local CLI agent is a subprocess over a network service, and it fails the way those
+        # fail: intermittently, and by returning *nothing* rather than by raising. Every real
+        # end-to-end failure this project ever recorded was exactly that - one empty researcher
+        # reply on the first step, and the run halted with no second attempt. So an execution
+        # is now attempted up to `execution.retry.attempts` times, with a widening gap, and
+        # steps down the model ladder as it goes when one is configured.
+        #
+        # A retry is not an ensemble. However many attempts it takes, the phase produces ONE
+        # AgentResult, because `agent_results` is what consensus is resolved from and what
+        # `--stats` computes pass rates over; three rows for one execution would corrupt both.
+        # The attempts that failed are recorded as their own events instead.
+        retry_cfg = get_retry_config(config)
+        max_attempts = max(1, int(retry_cfg.get("attempts", 1)))
+        base_backoff = float(retry_cfg.get("backoff_seconds", 0.0))
+        max_backoff = float(retry_cfg.get("max_backoff_seconds", 30.0))
+        escalate = bool(retry_cfg.get("escalate_model", True)) and bool(model_ladder)
 
-            exec_mode = "headless"
-            if isinstance(raw_res, tuple):
-                if len(raw_res) == 3:
-                    output_text, token_usage, exec_mode = raw_res
-                elif len(raw_res) == 2:
-                    output_text, token_usage = raw_res
+        attempt_failures: List[str] = []
+        output_text = ""
+        token_usage = unavailable_token_usage()
+        exec_mode = "headless"
+        duration = 0.0
+        fatal_exception: Optional[BaseException] = None
+
+        for attempt in range(1, max_attempts + 1):
+            fatal_exception = None
+            start_time = time.time()
+            try:
+                kwargs = {
+                    "working_dir": project_root,
+                    "model": model_name,
+                    "visible": visible,
+                    "title": term_title,
+                    "role": role_name,
+                    "terminal_type": term_type,
+                    "pause_on_completion": pause_secs,
+                    "tracer": default_tracer,
+                    "agent_execution_mode": agent_exec_mode,
+                    "return_usage": True,
+                }
+                if runner == run_opencode:
+                    kwargs["return_execution_mode"] = True
+
+                raw_res = runner(prompt, **kwargs)
+                duration = round(time.time() - start_time, 2)
+
+                exec_mode = "headless"
+                if isinstance(raw_res, tuple):
+                    if len(raw_res) == 3:
+                        output_text, token_usage, exec_mode = raw_res
+                    elif len(raw_res) == 2:
+                        output_text, token_usage = raw_res
+                    else:
+                        output_text, token_usage = "", unavailable_token_usage()
                 else:
-                    output_text, token_usage = "", unavailable_token_usage()
-            else:
-                output_text = str(raw_res) if raw_res is not None else ""
+                    output_text = str(raw_res) if raw_res is not None else ""
+                    token_usage = unavailable_token_usage()
+
+                if (output_text or "").strip():
+                    break  # the execution produced something; carry on below
+
+                reason = f"{agent_name} returned empty output for {role_name}"
+            except Exception as exc:  # noqa: BLE001 - every failure mode retries the same way
+                duration = round(time.time() - start_time, 2)
+                fatal_exception = exc
+                detail = str(exc) if str(exc).strip() else repr(exc)
+                reason = f"node error ({type(exc).__name__}): {detail}"
+                output_text = ""
                 token_usage = unavailable_token_usage()
 
-            if not output_text.strip():
-                err_msg = f"{agent_name} returned empty output for {role_name}"
+            attempt_failures.append(f"attempt {attempt}: {reason}")
+
+            if attempt >= max_attempts:
+                break
+
+            # Widen the gap, and step down the ladder if one is configured. The next rung is
+            # a *stronger* model by convention, which is the same bet the repair ladder makes.
+            backoff = min(base_backoff * (2 ** (attempt - 1)), max_backoff)
+            next_model = model_name
+            if escalate and model_ladder and ladder_rung < len(model_ladder) - 1:
+                ladder_rung += 1
+                next_model = model_ladder[ladder_rung]
+
+            default_tracer.log_agent_retry(
+                agent=agent_name, role=role_name, attempt=attempt, of=max_attempts,
+                reason=reason, model=model_name, next_model=next_model,
+                backoff_seconds=backoff,
+            )
+            if store is not None:
+                store.record_agent_retry(
+                    agent=agent_name, role=role_name, attempt=attempt, of=max_attempts,
+                    reason=reason, model=model_name, next_model=next_model,
+                    backoff_seconds=backoff,
+                )
+
+            model_name = next_model
+            if backoff > 0:
+                time.sleep(backoff)
+
+        try:
+            if not (output_text or "").strip():
+                # Every attempt failed. Report the last reason, and carry the whole history
+                # so "it was flaky" and "it is broken" are distinguishable after the fact.
+                if fatal_exception is not None:
+                    detail = (
+                        str(fatal_exception)
+                        if str(fatal_exception).strip()
+                        else repr(fatal_exception)
+                    )
+                    err_msg = (
+                        f"{agent_name} ({role_name}) node error "
+                        f"({type(fatal_exception).__name__}): {detail}"
+                    )
+                else:
+                    err_msg = f"{agent_name} returned empty output for {role_name}"
+                if max_attempts > 1:
+                    err_msg += f" (after {max_attempts} attempts)"
+
                 default_tracer.log_agent_error(agent_name, role_name, err_msg, model=model_name)
                 error_result = create_agent_result(
                     # The failure reason is recorded as the result's output so it
@@ -558,6 +809,8 @@ def make_role_node(role_name: str, agent_index: Optional[int] = None, is_repair:
                     agent=agent_name, role=role_name, status="error", output=err_msg,
                     duration_seconds=duration, model=model_name, token_usage=token_usage,
                     execution_mode=exec_mode,
+                    attempts=len(attempt_failures) or 1,
+                    attempt_failures=list(attempt_failures),
                 )
                 store = _get_store(state)
                 if store is not None:
@@ -591,7 +844,13 @@ def make_role_node(role_name: str, agent_index: Optional[int] = None, is_repair:
             res = create_agent_result(
                 agent=agent_name, role=role_name, status="success", output=output_text,
                 duration_seconds=duration, model=model_name, token_usage=token_usage,
-                execution_mode=exec_mode, verdict=verdict, repair_attempt=repair_attempts if is_repair else None
+                execution_mode=exec_mode, verdict=verdict,
+                repair_attempt=repair_attempts if is_repair else None,
+                # A success on the second attempt is still a success, but a run whose agents
+                # needed retrying is a different fact from one whose agents did not, and only
+                # the result can carry it to `--stats`.
+                attempts=len(attempt_failures) + 1,
+                attempt_failures=list(attempt_failures) or None,
             )
 
             store = _get_store(state)
@@ -601,6 +860,24 @@ def make_role_node(role_name: str, agent_index: Optional[int] = None, is_repair:
             state_updates: OrchestratorState = {
                 "agent_results": [res],
             }
+
+            if role_name == "decomposer":
+                # The agent's reply is text until it parses. The plan - not the prose - is
+                # the durable fact.
+                plan = parse_task_plan(
+                    output_text,
+                    goal=task,
+                    max_tasks=int(get_planning_config(config).get("max_tasks", 12)),
+                )
+                state_updates["task_plan"] = plan
+                default_tracer.log_task_plan(
+                    task_count=len(plan.get("tasks") or []),
+                    waves=len(plan.get("order") or []),
+                    error=plan.get("error"),
+                    warnings=list(plan.get("warnings") or []),
+                )
+                if store is not None:
+                    store.record_task_plan(plan)
 
             # Record durable facts only. The phase verdict is resolved by the
             # sync node; `status` is derived by finalize_node.
@@ -632,7 +909,11 @@ def make_role_node(role_name: str, agent_index: Optional[int] = None, is_repair:
 
         except Exception as exc:
             duration = round(time.time() - start_time, 2)
-            err_msg = f"{agent_name} ({role_name}) node error: {exc}"
+            # Name the exception type and fall back to `repr` when `str(exc)` is
+            # empty (e.g. StopIteration), so a swallowed failure is never logged
+            # as a bare "node error: ".
+            detail = str(exc) if str(exc).strip() else repr(exc)
+            err_msg = f"{agent_name} ({role_name}) node error ({type(exc).__name__}): {detail}"
             default_tracer.log_agent_error(agent_name, role_name, err_msg, model=model_name)
             error_result = create_agent_result(
                 agent=agent_name, role=role_name, status="error", output=err_msg,
@@ -645,6 +926,47 @@ def make_role_node(role_name: str, agent_index: Optional[int] = None, is_repair:
             return {"agent_results": [error_result]}
 
     return role_node
+
+
+def acceptance_node(state: OrchestratorState) -> OrchestratorState:
+    """Run the project's own acceptance command and record the result (Phase 0).
+
+    Runs between the implementer and the verifier, so the verifier is handed evidence rather
+    than asked to produce it. The command comes from the configuration loaded at the project
+    root, never from the worktree the agents can edit.
+    """
+    if has_error(state):
+        return {}
+
+    config = state.get("config") or load_config(state.get("config_path"), state.get("project_root"))
+    cfg = get_acceptance_config(config)
+    command = cfg.get("command")
+    repair_attempts = int(state.get("repair_attempts") or 0)
+
+    if not parse_command(command):
+        return {}
+
+    default_tracer.log_acceptance_start(parse_command(command))
+    check = run_acceptance(
+        command,
+        working_dir=_working_dir(state) or "",
+        timeout_seconds=int(cfg.get("timeout_seconds", 600)),
+        output_limit=int(cfg.get("output_limit", 4000)),
+        repair_attempts=repair_attempts,
+    )
+    default_tracer.log_acceptance_result(
+        ok=bool(check.get("ok")),
+        exit_code=check.get("exit_code"),
+        duration_seconds=float(check.get("duration_seconds") or 0.0),
+        error=check.get("error"),
+        required=bool(cfg.get("required", True)),
+    )
+
+    store = _get_store(state)
+    if store is not None:
+        store.record_acceptance(check)
+
+    return {"acceptance_checks": [dict(check)]}
 
 
 def make_sync_node(role_name: str, member_count: int):
@@ -667,6 +989,15 @@ def make_sync_node(role_name: str, member_count: int):
 
         results = list(state.get("agent_results") or [])
         group = get_latest_role_outputs(results, role_name)
+
+        # A resumed run carries the previous session's records for this role in
+        # the same trailing block. When this phase actually executed, judge it on
+        # what it produced now: a member that died in the session before is part
+        # of the run's history, not of this phase's outcome (Tier 1 #4).
+        fresh = [r for r in group if not r.get("restored")]
+        if fresh:
+            group = fresh
+
         errored = [r for r in group if r.get("status") == "error"]
         succeeded = [r for r in group if r.get("status") == "success"]
 
@@ -704,10 +1035,16 @@ def make_sync_node(role_name: str, member_count: int):
         if role_name == "verifier":
             policy = state.get("consensus_policy") or "unanimous"
             group_records = latest_verification_group(state)
-            verdict = resolve_consensus(
+            consensus = resolve_consensus(
                 [rec.get("verdict") for rec in group_records], policy=policy
             )
+            # `derive_verdict` owns the precedence between a consensus and the objective
+            # acceptance gate (Phase 0), so the routed verdict is read from it rather than
+            # recomputed here - otherwise the router and the derived status could disagree.
+            verdict = derive_verdict(state, policy=policy) or consensus
             updates["verification_verdict"] = verdict
+            if verdict != consensus:
+                default_tracer.log_acceptance_override(consensus, verdict)
 
             if member_count > 1 or len(group_records) > 1:
                 default_tracer.log_consensus(
@@ -720,12 +1057,34 @@ def make_sync_node(role_name: str, member_count: int):
             repair_attempts = state.get("repair_attempts", 0)
             max_repair_attempts = state.get("max_repair_attempts", 2)
 
+            # Tier 2 #11 - measure the run against its ceiling here, where the
+            # decision to fund another attempt is about to be made, and record
+            # the answer as a fact. `should_repair_or_end` and `derive_status`
+            # both read that fact rather than re-measuring a moving clock.
+            budget_state = evaluate_budget(state)
+            updates["budget_state"] = dict(budget_state)
+            if budget_state.get("exhausted") and verdict != VERDICT_PASS:
+                reason = budget_state.get("reason") or "run budget exhausted"
+                updates["budget_exhausted_reason"] = reason
+                if verdict != VERDICT_BLOCKED:
+                    default_tracer.log_budget_exhausted(
+                        reason=reason,
+                        tokens_spent=int(budget_state.get("tokens_spent") or 0),
+                        max_total_tokens=int(budget_state.get("max_total_tokens") or 0),
+                        seconds_elapsed=float(budget_state.get("seconds_elapsed") or 0.0),
+                        max_duration_seconds=int(budget_state.get("max_duration_seconds") or 0),
+                        repair_attempts=repair_attempts,
+                        max_repair_attempts=max_repair_attempts,
+                    )
+
             if verdict == VERDICT_BLOCKED:
                 reason = derive_blocked_reason(state) or (
                     "A verifier reported that human input is required."
                 )
                 updates["blocked_reason"] = reason
                 default_tracer.log_blocked(reason)
+                default_tracer.log_workflow_complete()
+            elif updates.get("budget_exhausted_reason"):
                 default_tracer.log_workflow_complete()
             else:
                 default_tracer.log_repair_decision(
@@ -757,6 +1116,19 @@ def finalize_node(state: OrchestratorState) -> OrchestratorState:
     if isinstance(report, dict):
         summary["preflight_ok"] = bool(report.get("ok"))
 
+    gate = latest_check(state.get("acceptance_checks"), int(state.get("repair_attempts") or 0))
+    if gate is not None:
+        summary["acceptance"] = dict(gate)
+        summary["acceptance_summary"] = describe_check(gate)
+
+    plan = state.get("task_plan")
+    if isinstance(plan, dict):
+        summary["task_plan"] = {
+            "tasks": len(plan.get("tasks") or []),
+            "waves": len(plan.get("order") or []),
+            "error": plan.get("error"),
+        }
+
     if state.get("error"):
         summary["error"] = state.get("error")
 
@@ -777,12 +1149,26 @@ def finalize_node(state: OrchestratorState) -> OrchestratorState:
             )
             if commit:
                 workspace_summary["commit"] = commit
+
+        # The commit above put the work on the branch, which makes the checkout
+        # redundant. Leaving it costs a full copy of the project per run, so it
+        # goes - unless it is dirty, in which case it is the only copy.
+        retention = finish_worktree(
+            workspace,
+            keep_worktree=bool(ws_cfg.get("keep_worktree", False)),
+            commit=workspace_summary.get("commit"),
+        )
+        workspace_summary["retention"] = retention
         default_tracer.log_workspace_result(
             describe_workspace(workspace),
             change_count=int(workspace_summary.get("change_count") or 0),
             commit=workspace_summary.get("commit"),
+            retention=describe_retention(workspace, retention),
         )
     summary["workspace"] = workspace_summary
+    started = state.get("run_started_at")
+    if isinstance(started, (int, float)) and started > 0:
+        summary["duration_seconds"] = round(time.time() - float(started), 2)
 
     store = _get_store(state)
     if store is not None:
@@ -806,6 +1192,11 @@ def should_repair_or_end(state: OrchestratorState) -> str:
     Repair is attempted only for verdicts an agent could plausibly fix. A
     BLOCKED verdict needs a human, so it finalizes immediately without spending
     any of the repair budget (Tier 1 #7).
+
+    Three ceilings govern a repair, and all of them are checked here: the number
+    of attempts (`max_repair_attempts`), the tokens spent, and the wall time
+    elapsed (Tier 2 #11). An escalation ladder makes each attempt more expensive
+    than the last, so an attempt bound alone does not bound cost.
     """
     if has_error(state):
         return "finalize"
@@ -823,6 +1214,11 @@ def should_repair_or_end(state: OrchestratorState) -> str:
         return "finalize"
 
     if not is_repairable(verdict):
+        return "finalize"
+
+    # The sync node records the budget verdict as a fact; re-measure only when
+    # routing a state that never passed through it.
+    if state.get("budget_exhausted_reason") or evaluate_budget(state).get("exhausted"):
         return "finalize"
 
     repair_attempts = state.get("repair_attempts", 0)
@@ -857,6 +1253,10 @@ def build_graph(config: OrchestratorConfig):
     builder.add_edge(START, "context")
     builder.add_edge("context", "preflight")
     builder.add_edge("finalize", END)
+
+    # The acceptance gate is a node in its own right, placed immediately before the verifier,
+    # so that every path into verification - the first pass and every repair - runs it.
+    gate_enabled = bool(parse_command(get_acceptance_config(config).get("command")))
 
     agents = config.get("agents", [])
     if not agents:
@@ -900,6 +1300,14 @@ def build_graph(config: OrchestratorConfig):
     for phase in phases:
         role = phase[0][1].get("role")
 
+        # Objective evidence is gathered before the verifier is asked for an opinion.
+        if role == "verifier" and gate_enabled and "acceptance" not in phase_members:
+            builder.add_node("acceptance", acceptance_node)
+            for prev in last_phase_nodes:
+                builder.add_edge(prev, "acceptance")
+            last_phase_nodes = ["acceptance"]
+            phase_members["acceptance"] = ["acceptance"]
+
         # A role appearing in two non-consecutive phases must not collide.
         seen = used_sync_names.get(role, 0)
         used_sync_names[role] = seen + 1
@@ -934,18 +1342,60 @@ def build_graph(config: OrchestratorConfig):
                 "finalize": "finalize",
             },
         )
-        for member in phase_members.get("verifier", ["verifier"]):
-            builder.add_edge("repair_node", member)
+        if gate_enabled and "acceptance" in phase_members:
+            # A repair changes the workspace, so the gate is re-run before it is re-judged.
+            builder.add_edge("repair_node", "acceptance")
+        else:
+            for member in phase_members.get("verifier", ["verifier"]):
+                builder.add_edge("repair_node", member)
     else:
         for node in last_phase_nodes:
             builder.add_edge(node, "finalize")
 
     return builder.compile()
 
-# To maintain backward compatibility with `from orchestrator.graph import graph`, 
-# we need to build a static graph using the default config initially.
-# When actually running, the state's `config` can override node behavior, 
-# but the topology is fixed at import time by `orchestrator.yaml`.
+def build_plan_graph(config: OrchestratorConfig):
+    """Assemble the decomposition-only graph (Roadmap Phase 1).
+
+    Topology::
+
+        START -> context -> preflight -> decomposer -> finalize -> END
+
+    Deliberately not part of `build_graph`: decomposition runs *before* a pipeline and produces
+    a plan, not a change. Keeping it a separate graph means `--plan-only` cannot accidentally
+    launch an implementer, and an ordinary run never pays for a decomposition it did not ask
+    for.
+    """
+    planning = get_planning_config(config)
+    agent_entry = {
+        "agent": planning.get("agent") or "claude",
+        "model": planning.get("model"),
+        "role": "decomposer",
+    }
+
+    builder = StateGraph(OrchestratorState)
+    builder.add_node("context", context_node)
+    builder.add_node("preflight", preflight_node)
+    builder.add_node(
+        "decomposer_0",
+        make_role_node("decomposer", agent_override=agent_entry),
+    )
+    builder.add_node("decomposer", make_sync_node("decomposer", 1))
+    builder.add_node("finalize", finalize_node)
+
+    builder.add_edge(START, "context")
+    builder.add_edge("context", "preflight")
+    builder.add_edge("preflight", "decomposer_0")
+    builder.add_edge("decomposer_0", "decomposer")
+    builder.add_edge("decomposer", "finalize")
+    builder.add_edge("finalize", END)
+    return builder.compile()
+
+
+# `from orchestrator.graph import graph` stays available for LangGraph's own tooling
+# (langgraph.json) and for tests. Its topology is fixed at import time by the project's
+# orchestrator.yaml, so the CLI does not use it: `__main__` calls `build_graph` with the
+# configuration resolved for the run, because the topology depends on that configuration.
 try:
     _initial_config = load_config(None, get_project_root())
 except Exception:

@@ -123,6 +123,8 @@ class AgentResult(TypedDict, total=False):
     repair_attempt: Optional[int]  # Repair iteration index (e.g. 1, 2) if applicable
     token_usage: Optional[TokenUsage]  # Structured token usage metadata (Stage 7.6)
     execution_mode: Optional[str]  # e.g. "native_tui" or "headless" (Stage 7.5.2)
+    attempts: Optional[int]  # How many executions this one result took; 1 when it worked first
+    attempt_failures: Optional[List[str]]  # Why each earlier attempt failed, oldest first
 
 
 class VerificationRecord(TypedDict, total=False):
@@ -147,6 +149,8 @@ def create_agent_result(
     repair_attempt: Optional[int] = None,
     token_usage: Optional[TokenUsage] = None,
     execution_mode: Optional[str] = None,
+    attempts: Optional[int] = None,
+    attempt_failures: Optional[List[str]] = None,
 ) -> AgentResult:
     """Helper to construct a validated AgentResult dictionary.
 
@@ -161,6 +165,11 @@ def create_agent_result(
         repair_attempt: Optional repair iteration index if this execution is a repair or post-repair verification.
         token_usage: Optional TokenUsage dictionary containing reliable CLI usage metadata.
         execution_mode: Optional execution mode ("native_tui" or "headless").
+        attempts: How many executions produced this one result. One result per phase however
+            many attempts it took - a retry is not an ensemble, and consensus and `--stats`
+            both count results.
+        attempt_failures: Why each earlier attempt failed, oldest first, so "it was flaky" and
+            "it is broken" stay distinguishable after the run.
 
     Returns:
         A structured AgentResult TypedDict instance.
@@ -180,6 +189,12 @@ def create_agent_result(
         res["repair_attempt"] = repair_attempt
     if execution_mode is not None:
         res["execution_mode"] = execution_mode
+    # Only carried when it says something: every result would otherwise gain `attempts: 1`,
+    # which is noise in a stored event and in every diff of one.
+    if attempts is not None and attempts > 1:
+        res["attempts"] = attempts
+    if attempt_failures:
+        res["attempt_failures"] = list(attempt_failures)
     return res
 
 

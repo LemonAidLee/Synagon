@@ -41,9 +41,15 @@ EVENT_RUN_STARTED = "run_started"
 EVENT_PREFLIGHT = "preflight"
 EVENT_CONTEXT = "context_collected"
 EVENT_SKILLS = "skills_discovered"
+EVENT_AGENT_STARTED = "agent_started"
 EVENT_AGENT_RESULT = "agent_result"
+EVENT_AGENT_RETRY = "agent_retry"
 EVENT_VERIFICATION = "verification"
 EVENT_RUN_FINISHED = "run_finished"
+EVENT_RUN_RESUMED = "run_resumed"
+EVENT_WORKSPACE = "workspace"
+EVENT_ACCEPTANCE = "acceptance"
+EVENT_TASK_PLAN = "task_plan"
 
 
 def utc_now_iso() -> str:
@@ -196,8 +202,17 @@ class RunStore:
         project_root: str,
         config: Optional[Dict[str, Any]] = None,
         max_repair_attempts: Optional[int] = None,
+        settings: Optional[Dict[str, Any]] = None,
+        goal_id: Optional[str] = None,
+        task_id: Optional[str] = None,
     ) -> None:
-        """Record run start and seed run.json."""
+        """Record run start and seed run.json.
+
+        `settings` records the knobs this run was configured with - consensus
+        policy, isolation mode, budget. They cost nothing to store and they are
+        what makes `--stats` able to answer whether a setting was worth its
+        price; a run that does not record them can only be counted, not compared.
+        """
         agents = []
         for entry in (config or {}).get("agents", []) or []:
             agents.append(
@@ -217,6 +232,11 @@ class RunStore:
             "verdict": None,
             "agents": agents,
             "max_repair_attempts": max_repair_attempts,
+            "settings": dict(settings or {}),
+            # Set when this session is one task of a delegated goal (Roadmap Phase 2), so a
+            # goal's tasks can be found from the sessions that carried them out.
+            "goal_id": goal_id,
+            "task_id": task_id,
         }
         self._write_meta(meta)
         self._append(
@@ -226,8 +246,41 @@ class RunStore:
                 "project_root": project_root,
                 "agents": agents,
                 "max_repair_attempts": max_repair_attempts,
+                "settings": dict(settings or {}),
+                "goal_id": goal_id,
+                "task_id": task_id,
             },
         )
+
+    def record_run_resumed(
+        self,
+        replayed_roles: Optional[List[str]] = None,
+        repair_attempts: int = 0,
+    ) -> None:
+        """Record that this run was picked up again after stopping.
+
+        Appended to the original run's log, because a resumed run is the same
+        run continuing - splitting it into a second record would make its cost
+        and its history unreadable.
+        """
+        self._append(
+            EVENT_RUN_RESUMED,
+            {
+                "replayed_roles": list(replayed_roles or []),
+                "repair_attempts": repair_attempts,
+            },
+        )
+        try:
+            meta: Dict[str, Any] = {}
+            if self.meta_path.is_file():
+                with open(self.meta_path, "r", encoding="utf-8") as handle:
+                    meta = json.load(handle)
+            meta["status"] = "running"
+            meta["finished_at"] = None
+            meta["resumed_count"] = int(meta.get("resumed_count") or 0) + 1
+            self._write_meta(meta)
+        except Exception as exc:
+            self._mark_degraded(f"Could not record resume: {exc}")
 
     def record_preflight(self, report: Dict[str, Any]) -> None:
         """Record the preflight report."""
@@ -248,12 +301,84 @@ class RunStore:
         """Record discovered skill names."""
         self._append(EVENT_SKILLS, {"count": len(skill_names), "skills": skill_names})
 
+    def record_agent_started(
+        self,
+        agent: str,
+        role: str,
+        model: Optional[Any] = None,
+        repair_attempt: Optional[int] = None,
+    ) -> None:
+        """Record that an agent was launched.
+
+        Until this existed, a reader could only see agents that had already *finished*, so
+        anything watching a run had to infer who was working from who was not. An execution
+        beginning is a durable fact like any other; recording it is what lets the board and the
+        office show work in progress rather than guess at it.
+        """
+        self._append(
+            EVENT_AGENT_STARTED,
+            {
+                "agent": agent,
+                "role": role,
+                "model": model,
+                "repair_attempt": repair_attempt,
+            },
+        )
+
+    def record_agent_retry(
+        self,
+        agent: str,
+        role: str,
+        attempt: int,
+        of: int,
+        reason: str,
+        model: Optional[Any] = None,
+        next_model: Optional[Any] = None,
+        backoff_seconds: float = 0.0,
+    ) -> None:
+        """Record that one execution failed and is being attempted again.
+
+        A retry is a fact, and an expensive one - it costs a whole agent invocation. It is
+        recorded as its own event rather than as another `agent_result` because the phase
+        produced *one* outcome, and a reader counting results to resolve consensus or to
+        compute a pass rate must not see a retried execution as an ensemble of three.
+        """
+        self._append(
+            EVENT_AGENT_RETRY,
+            {
+                "agent": agent,
+                "role": role,
+                "attempt": attempt,
+                "of": of,
+                "reason": reason,
+                "model": model,
+                "next_model": next_model,
+                "backoff_seconds": round(float(backoff_seconds), 2),
+            },
+        )
+
     def record_agent_result(self, result: Dict[str, Any]) -> None:
         """Record one AgentResult exactly as the pipeline produced it."""
         payload = dict(result)
         if "output" in payload and isinstance(payload["output"], str):
             payload["output"] = _truncate(payload["output"], self.max_output_chars)
         self._append(EVENT_AGENT_RESULT, {"result": payload})
+
+    def record_acceptance(self, check: Dict[str, Any]) -> None:
+        """Record one objective acceptance gate result (Roadmap Phase 0).
+
+        Stored in full, including its output: this is the one piece of a run that is evidence
+        rather than testimony, and `--stats` reads it back to ask how often a verifier's PASS
+        disagreed with it.
+        """
+        payload = dict(check)
+        if isinstance(payload.get("output"), str):
+            payload["output"] = _truncate(payload["output"], self.max_output_chars)
+        self._append(EVENT_ACCEPTANCE, {"check": payload})
+
+    def record_task_plan(self, plan: Dict[str, Any]) -> None:
+        """Record a decomposition (Roadmap Phase 1)."""
+        self._append(EVENT_TASK_PLAN, {"plan": dict(plan)})
 
     def record_verification(self, record: Dict[str, Any]) -> None:
         """Record one VerificationRecord."""
@@ -295,6 +420,9 @@ def open_run(
     directory: Optional[str] = None,
     max_output_chars: int = 0,
     max_repair_attempts: Optional[int] = None,
+    settings: Optional[Dict[str, Any]] = None,
+    goal_id: Optional[str] = None,
+    task_id: Optional[str] = None,
 ) -> Optional[RunStore]:
     """Create and seed a run store, or return None when persistence is disabled."""
     if not enabled:
@@ -309,6 +437,9 @@ def open_run(
         project_root=project_root,
         config=config,
         max_repair_attempts=max_repair_attempts,
+        settings=settings,
+        goal_id=goal_id,
+        task_id=task_id,
     )
     return store
 

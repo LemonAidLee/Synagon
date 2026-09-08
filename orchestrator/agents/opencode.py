@@ -195,18 +195,40 @@ def run_opencode_with_usage(
     """
     exec_mode_str = (agent_execution_mode or "auto").strip().lower()
 
+    # A recorder (installed by the daemon, Roadmap Phase 10) means there is somewhere for a
+    # live view to go that is not the Antigravity IDE's own bridge - the cockpit's terminal
+    # panel. When one is present, native TUI no longer needs that bridge to be worth using:
+    # the real interactive `opencode attach` process is captured through a pty instead and
+    # relayed the same way any other agent's output would be.
+    from orchestrator.launcher import get_output_recorder
+
+    recorder = get_output_recorder()
+
     # Determine whether to use native TUI execution
     use_native_tui = False
     if exec_mode_str == "native_tui":
         use_native_tui = True
     elif exec_mode_str == "auto":
-        is_integrated = terminal_type in ("antigravity_integrated", "integrated", "auto")
-        bridge_url = get_antigravity_bridge_url()
-        bridge_active = bool(bridge_url and check_antigravity_bridge(bridge_url))
-        if visible and is_integrated and bridge_active:
+        if recorder is not None:
             use_native_tui = True
+        else:
+            is_integrated = terminal_type in ("antigravity_integrated", "integrated", "auto")
+            bridge_url = get_antigravity_bridge_url()
+            bridge_active = bool(bridge_url and check_antigravity_bridge(bridge_url))
+            if visible and is_integrated and bridge_active:
+                use_native_tui = True
 
     if use_native_tui:
+        sink = None
+        if recorder is not None:
+            try:
+                sink = recorder(
+                    agent="opencode", role=role, model=model,
+                    cmd=["opencode", "attach", "<session>"], cwd=working_dir or os.getcwd(),
+                )
+            except Exception:
+                sink = None
+
         response_text, token_usage = run_opencode_native_tui(
             prompt=prompt,
             project_root=working_dir or os.getcwd(),
@@ -215,7 +237,11 @@ def run_opencode_with_usage(
             pause_on_completion=pause_on_completion,
             terminal_title=title,
             tracer=tracer,
+            sink=sink,
         )
+        stream = getattr(sink, "stream", None)
+        if stream is not None:
+            stream.close(0)
         if return_execution_mode:
             return response_text, token_usage, "native_tui"
         return response_text, token_usage

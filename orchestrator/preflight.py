@@ -24,6 +24,7 @@ Probing is read-only: it never launches an agent, never sends a prompt, and
 never writes to the workspace.
 """
 
+import shutil
 import subprocess
 import time
 from typing import Any, Callable, Dict, List, Optional, TypedDict
@@ -33,6 +34,7 @@ from orchestrator.agents.claude_code import get_claude_executable_path
 from orchestrator.agents.opencode import get_opencode_executable_path
 from orchestrator.config import (
     OrchestratorConfig,
+    get_acceptance_config,
     get_available_models,
     validate_model,
 )
@@ -324,6 +326,32 @@ def check_verifier_independence(config: Optional[OrchestratorConfig]) -> List[st
     return warnings
 
 
+def check_acceptance_command(config: Optional[OrchestratorConfig]) -> List[str]:
+    """Warn when the configured acceptance command cannot be found on PATH.
+
+    A gate whose binary does not resolve fails every run for a reason that has nothing to do
+    with the code being written, and the failure appears minutes in, after two agents have
+    been paid for. Catching it here costs nothing.
+
+    Only a warning: the command may be provided by an environment that exists at run time but
+    not at probe time, and preflight must not become a reason a working project cannot run.
+    """
+    from orchestrator.acceptance import parse_command
+
+    argv = parse_command(get_acceptance_config(config).get("command"))
+    if not argv:
+        return []
+
+    executable = argv[0]
+    if shutil.which(executable) is None:
+        return [
+            f"acceptance gate: '{executable}' was not found on PATH, so the check "
+            f"'{' '.join(argv)}' will fail before it runs. Fix the command or set "
+            f"verification.acceptance.command to '' to disable the gate."
+        ]
+    return []
+
+
 def run_preflight(
     config: Optional[OrchestratorConfig],
     deep: bool = False,
@@ -395,6 +423,7 @@ def run_preflight(
         warnings.extend(f"{label}: {msg}" for msg in probe.get("warnings") or [])
 
     warnings.extend(check_verifier_independence(config))
+    warnings.extend(check_acceptance_command(config))
 
     return {
         "ok": not errors,

@@ -1,11 +1,20 @@
 """Unit and integration tests for the LangGraph orchestrator workflow."""
 
 import os
+import shutil
 import unittest
 from unittest.mock import patch, MagicMock
 
-from orchestrator.graph import graph
+from orchestrator.config import DEFAULT_CONFIG
+from orchestrator.graph import build_graph
 from orchestrator.tracer import default_tracer
+
+from tests.support import (
+    RunStoreGuard,
+    isolated_graph_state,
+    redirected_run_store,
+    temporary_store_dir,
+)
 
 
 class TestWorkflow(unittest.TestCase):
@@ -28,12 +37,12 @@ class TestWorkflow(unittest.TestCase):
         task = "Review architecture and dependency structure"
         initial_state = {
             "task": task,
-            "project_root": os.getcwd(),
+            "project_root": os.getcwd(), "config": DEFAULT_CONFIG,
             "run_store_enabled": False,
             "workspace": {"isolated": False, "path": os.getcwd()},
         }
 
-        result = graph.invoke(initial_state)
+        result = build_graph(DEFAULT_CONFIG).invoke(initial_state)
 
         # 1. Verify LangGraph state fields
         self.assertEqual(result["status"], "completed")
@@ -73,7 +82,7 @@ class TestWorkflow(unittest.TestCase):
         self.assertEqual(opencode_res["role"], "implementer")
         self.assertEqual(opencode_res["status"], "success")
         self.assertEqual(opencode_res["output"], "OpenCode implementation: applied planned changes cleanly in workspace.")
-        self.assertEqual(opencode_res["model"], "opencode/big-pickle")
+        self.assertEqual(opencode_res["model"], "opencode/gpt-5.1-codex")
         self.assertGreaterEqual(opencode_res["duration_seconds"], 0.0)
 
         # Fourth result: Claude Code as verifier
@@ -112,7 +121,7 @@ class TestWorkflow(unittest.TestCase):
         mock_opencode.assert_called_once()
         opencode_call_args = mock_opencode.call_args
         opencode_prompt = opencode_call_args[0][0]
-        self.assertEqual(opencode_call_args.kwargs.get("model"), "opencode/big-pickle")
+        self.assertEqual(opencode_call_args.kwargs.get("model"), "opencode/gpt-5.1-codex")
         self.assertIn(task, opencode_prompt)
         self.assertIn("implementer", opencode_prompt)
         self.assertIn("ORIGINAL USER TASK", opencode_prompt)
@@ -146,8 +155,14 @@ class TestWorkflow(unittest.TestCase):
         mock_claude.side_effect = ["Mock review", "VERDICT: PASS\nAll verified."]
         mock_opencode.return_value = "Mock implementation"
 
-        initial_state = {"task": "Verify trace sequence", "project_root": os.getcwd(), "workspace": {"isolated": False, "path": os.getcwd()}}
-        graph.invoke(initial_state)
+        # The run store stays enabled - the sequence asserted below names its events -
+        # but it is redirected, so the suite does not append a run to the developer's own
+        # project every time it runs. See tests/support.py.
+        store_dir = temporary_store_dir()
+        self.addCleanup(shutil.rmtree, store_dir, ignore_errors=True)
+        config = redirected_run_store(DEFAULT_CONFIG, store_dir)
+        initial_state = isolated_graph_state(DEFAULT_CONFIG, "Verify trace sequence", store_dir)
+        build_graph(config).invoke(initial_state)
 
         events = default_tracer.get_events()
         event_names = [e.name for e in events]
@@ -189,7 +204,7 @@ class TestWorkflow(unittest.TestCase):
         opencode_start = next(e for e in events if e.name == "opencode_started")
         self.assertEqual(opencode_start.agent, "opencode")
         self.assertEqual(opencode_start.role, "implementer")
-        self.assertEqual(opencode_start.model, "opencode/big-pickle")
+        self.assertEqual(opencode_start.model, "opencode/gpt-5.1-codex")
 
         verifier_start = next(e for e in events if e.name == "claude_started" and e.role == "verifier")
         self.assertEqual(verifier_start.agent, "claude")
@@ -201,8 +216,8 @@ class TestWorkflow(unittest.TestCase):
         """Test safe error handling when an agent node fails."""
         mock_antigravity.side_effect = RuntimeError("Simulated CLI failure")
 
-        initial_state = {"task": "Test error handling", "project_root": os.getcwd(), "run_store_enabled": False, "workspace": {"isolated": False, "path": os.getcwd()}}
-        result = graph.invoke(initial_state)
+        initial_state = {"task": "Test error handling", "project_root": os.getcwd(), "config": DEFAULT_CONFIG, "run_store_enabled": False, "workspace": {"isolated": False, "path": os.getcwd()}}
+        result = build_graph(DEFAULT_CONFIG).invoke(initial_state)
 
         self.assertEqual(result["status"], "error")
         self.assertIn("antigravity (researcher) node error", result["error"])
@@ -227,7 +242,7 @@ class TestWorkflow(unittest.TestCase):
             "task": "Test invalid root",
             "project_root": "Z:\\non\\existent\\directory\\path\\12345",
         }
-        result = graph.invoke(initial_state)
+        result = build_graph(DEFAULT_CONFIG).invoke(initial_state)
 
         self.assertEqual(result["status"], "error")
         self.assertIn("Project context collection error", result["error"])
@@ -242,8 +257,8 @@ class TestWorkflow(unittest.TestCase):
         mock_claude.return_value = "Mock review"
         mock_opencode.side_effect = RuntimeError("Simulated OpenCode failure")
 
-        initial_state = {"task": "Test OpenCode error handling", "project_root": os.getcwd(), "run_store_enabled": False, "workspace": {"isolated": False, "path": os.getcwd()}}
-        result = graph.invoke(initial_state)
+        initial_state = {"task": "Test OpenCode error handling", "project_root": os.getcwd(), "config": DEFAULT_CONFIG, "run_store_enabled": False, "workspace": {"isolated": False, "path": os.getcwd()}}
+        result = build_graph(DEFAULT_CONFIG).invoke(initial_state)
 
         self.assertEqual(result["status"], "error")
         self.assertIn("opencode (implementer) node error", result["error"])
@@ -274,13 +289,13 @@ class TestWorkflow(unittest.TestCase):
 
         initial_state = {
             "task": "Test visible terminal parameters",
-            "project_root": os.getcwd(),
+            "project_root": os.getcwd(), "config": DEFAULT_CONFIG,
             "run_store_enabled": False,
             "workspace": {"isolated": False, "path": os.getcwd()},
             "visible_terminals": True,
             "pause_on_completion": 0.0,
         }
-        result = graph.invoke(initial_state)
+        result = build_graph(DEFAULT_CONFIG).invoke(initial_state)
 
         self.assertEqual(result["status"], "completed")
 
@@ -314,11 +329,11 @@ class TestLiveWorkflow(unittest.TestCase):
         """Live end-to-end test invoking Antigravity CLI -> LangGraph -> Claude Code CLI -> OpenCode CLI -> Claude Verifier."""
         initial_state = {
             "task": "Reply in 1 sentence: What is the primary benefit of type hints in Python?",
-            "project_root": os.getcwd(),
+            "project_root": os.getcwd(), "config": DEFAULT_CONFIG,
             "run_store_enabled": False,
             "workspace": {"isolated": False, "path": os.getcwd()},
         }
-        result = graph.invoke(initial_state)
+        result = build_graph(DEFAULT_CONFIG).invoke(initial_state)
 
         self.assertEqual(result["status"], "completed", f"Workflow failed: {result.get('error')}")
         self.assertTrue(bool(result.get("agent_results")), "agent_results should not be empty")
@@ -334,13 +349,13 @@ class TestLiveWorkflow(unittest.TestCase):
         """Live end-to-end test with visible terminals enabled."""
         initial_state = {
             "task": "Reply in 1 sentence: What is the primary benefit of type hints in Python?",
-            "project_root": os.getcwd(),
+            "project_root": os.getcwd(), "config": DEFAULT_CONFIG,
             "run_store_enabled": False,
             "workspace": {"isolated": False, "path": os.getcwd()},
             "visible_terminals": True,
             "pause_on_completion": 0.5,
         }
-        result = graph.invoke(initial_state)
+        result = build_graph(DEFAULT_CONFIG).invoke(initial_state)
 
         self.assertEqual(result["status"], "completed", f"Workflow failed: {result.get('error')}")
         self.assertTrue(bool(result.get("agent_results")), "agent_results should not be empty")
@@ -351,3 +366,61 @@ class TestLiveWorkflow(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTheSuiteStaysOutOfTheProject(unittest.TestCase):
+    """The suite must not write into the run store of the project it is testing.
+
+    This is a regression guard rather than a feature test. The run store is what `--stats`
+    analyses, what the board projects, and what the planner's memory reads, so a test that
+    appends to it does not merely leave litter: it changes what the orchestrator believes
+    about this repository. One checkout reached 141 suite artifacts against 16 real runs
+    before anyone noticed, because nothing was watching.
+    """
+
+    def setUp(self):
+        default_tracer.clear()
+
+    @patch("orchestrator.graph.run_opencode")
+    @patch("orchestrator.graph.run_claude_code")
+    @patch("orchestrator.graph.run_antigravity")
+    def test_running_the_graph_writes_no_run_into_the_real_store(
+        self, mock_antigravity, mock_claude, mock_opencode
+    ):
+        mock_antigravity.return_value = "Mock analysis"
+        mock_claude.side_effect = ["Mock review", "VERDICT: PASS\nAll verified."]
+        mock_opencode.return_value = "Mock implementation"
+
+        store_dir = temporary_store_dir()
+        self.addCleanup(shutil.rmtree, store_dir, ignore_errors=True)
+        config = redirected_run_store(DEFAULT_CONFIG, store_dir)
+
+        with RunStoreGuard(self):
+            build_graph(config).invoke(
+                isolated_graph_state(DEFAULT_CONFIG, "Guarded run", store_dir)
+            )
+
+    @patch("orchestrator.graph.run_opencode")
+    @patch("orchestrator.graph.run_claude_code")
+    @patch("orchestrator.graph.run_antigravity")
+    def test_the_redirected_store_really_did_record_the_run(
+        self, mock_antigravity, mock_claude, mock_opencode
+    ):
+        """The guard above would also pass if the store had simply been switched off, so
+        prove the run was recorded — somewhere else."""
+        from tests.support import read_runs
+
+        mock_antigravity.return_value = "Mock analysis"
+        mock_claude.side_effect = ["Mock review", "VERDICT: PASS\nAll verified."]
+        mock_opencode.return_value = "Mock implementation"
+
+        store_dir = temporary_store_dir()
+        self.addCleanup(shutil.rmtree, store_dir, ignore_errors=True)
+        config = redirected_run_store(DEFAULT_CONFIG, store_dir)
+        build_graph(config).invoke(
+            isolated_graph_state(DEFAULT_CONFIG, "Redirected run", store_dir)
+        )
+
+        records = read_runs(store_dir)
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["task"], "Redirected run")

@@ -22,7 +22,7 @@ from orchestrator.config import (
     validate_model,
     get_model_display_name,
 )
-from orchestrator.graph import graph
+from orchestrator.graph import build_graph
 from orchestrator.tracer import default_tracer
 
 
@@ -30,8 +30,43 @@ class TestConfig(unittest.TestCase):
     """Test suite covering configuration loading, validation, and resolution."""
 
     def test_load_default_project_config(self):
-        """Test loading the default orchestrator.yaml from the project root."""
-        config = load_config(project_root=os.getcwd())
+        """Test loading a project's own orchestrator.yaml from its project root.
+
+        Regression: this used to read the real repository's own orchestrator.yaml via
+        os.getcwd(), which made it a test about whatever team this project happens to be
+        configured with today rather than about load_config()'s own behavior - it broke the
+        moment a real edit (through the cockpit's team editor) added a second researcher.
+        An isolated fixture is what the test's own name asks for: loading *a* project's
+        config, not necessarily *this* one's.
+        """
+        fixture_yaml = (
+            "agents:\n"
+            "  - agent: antigravity\n"
+            "    model: gemini-3.8-flash-high\n"
+            "    role: researcher\n"
+            "  - agent: claude\n"
+            "    model: sonnet\n"
+            "    role: planner\n"
+            "  - agent: opencode\n"
+            "    model: opencode/gpt-5.1-codex\n"
+            "    role: implementer\n"
+            "  - agent: claude\n"
+            "    model: sonnet\n"
+            "    role: verifier\n"
+            "roles:\n"
+            "  researcher:\n"
+            "    responsibility: Investigate.\n"
+            "  planner:\n"
+            "    responsibility: Plan.\n"
+            "  implementer:\n"
+            "    responsibility: Implement.\n"
+            "  verifier:\n"
+            "    responsibility: Verify.\n"
+        )
+        with tempfile.TemporaryDirectory() as project_dir:
+            with open(os.path.join(project_dir, "orchestrator.yaml"), "w", encoding="utf-8") as f:
+                f.write(fixture_yaml)
+            config = load_config(project_root=project_dir)
         self.assertIsInstance(config, dict)
         self.assertGreaterEqual(len(config["agents"]), 2)
         self.assertIn("researcher", config["roles"])
@@ -391,7 +426,8 @@ class TestConfigWorkflowPropagation(unittest.TestCase):
                 "workspace": {"isolated": False, "path": os.getcwd()},
                 "config_path": temp_path,
             }
-            result = graph.invoke(initial_state)
+            custom_config = load_config(temp_path)
+            result = build_graph(custom_config).invoke(initial_state)
 
             self.assertEqual(result["status"], "completed")
 

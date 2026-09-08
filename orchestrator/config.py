@@ -26,12 +26,27 @@ class RoleConfig(TypedDict):
     responsibility: str
 
 
+class RetryConfig(TypedDict, total=False):
+    """How many times one agent execution may be re-attempted before the phase fails.
+
+    A local CLI agent is a subprocess over a network service, and it fails the way those fail:
+    intermittently, and by returning nothing rather than by raising. Until this existed the
+    pipeline halted on the first such failure, which made the whole run only as reliable as its
+    flakiest single call.
+    """
+    attempts: int            # total attempts per execution; 1 restores the old behaviour
+    backoff_seconds: float   # base delay, doubled per retry
+    max_backoff_seconds: float  # ceiling on that doubling
+    escalate_model: bool     # step down the model ladder on each retry, when one is configured
+
+
 class ExecutionConfig(TypedDict, total=False):
     """Configuration definition for execution environment and terminal visibility."""
     visible_terminals: bool
     terminal_type: str
     pause_on_completion: float
     agent_execution_mode: str  # "auto", "native_tui", "headless"
+    retry: RetryConfig         # what happens when one execution fails
 
 
 class PreflightConfig(TypedDict, total=False):
@@ -54,12 +69,89 @@ class WorkspaceConfig(TypedDict, total=False):
     isolation: str          # "auto" (isolate when possible), "worktree" (require), "none"
     directory: str          # Worktrees directory, relative to project root or absolute
     commit_on_finish: bool  # Commit the run's work onto its branch when it ends
-    keep_worktree: bool     # Leave the worktree on disk after the run
+    keep_worktree: bool     # Leave the checkout on disk after the run (default: remove it)
+
+
+class BudgetConfig(TypedDict, total=False):
+    """Configuration for spending ceilings (Tier 2 #11, and Roadmap Phase 2).
+
+    The escalation ladder can spend several agents across several repair
+    attempts on one task. `max_repair_attempts` bounds the number of attempts;
+    these bound their cost. 0 means unlimited.
+
+    The first pair bound one **session**. The `goal_` pair bound a whole
+    **goal** — every session its tasks run, added up — because a decomposition
+    multiplies a per-session ceiling by however many tasks it happened to emit.
+    """
+    max_total_tokens: int           # Stop escalating once this many tokens are spent
+    max_duration_seconds: int       # Stop escalating once the session has run this long
+    goal_max_total_tokens: int      # Stop starting tasks once the goal has spent this much
+    goal_max_duration_seconds: int  # Stop starting tasks once the goal has run this long
+
+
+class AcceptanceConfig(TypedDict, total=False):
+    """Configuration for the objective acceptance gate (Roadmap Phase 0).
+
+    A command the orchestrator runs itself, in the session's worktree, before the verifier.
+    Read from the user's checkout, so an agent cannot edit the command that judges it.
+    """
+    command: Any            # str or list of str; empty disables the gate
+    timeout_seconds: int    # seconds allowed before the command is killed
+    required: bool          # when the gate is red, a verifier's PASS cannot stand
+    output_limit: int       # characters of output kept and shown to agents
 
 
 class VerificationConfig(TypedDict, total=False):
     """Configuration for how several verifiers reach one verdict (Tier 2 #8)."""
     consensus: str  # "unanimous", "majority", or "any"
+    acceptance: Optional[AcceptanceConfig]
+
+
+class ApprovalConfig(TypedDict, total=False):
+    """Configuration for human approval gates (Roadmap Phase 5).
+
+    A gate stops the work at a clean boundary and records a pending approval, rather than
+    blocking a process on stdin: the person it is waiting for may not be there.
+    """
+    gates: Dict[str, bool]   # which gates are on: after_decomposition, before_task, before_merge
+    auto_approve: bool       # answer every gate automatically - the guardrail, made explicit
+    directory: str           # approvals directory, relative to project root or absolute
+
+
+class DeliveryConfig(TypedDict, total=False):
+    """Configuration for outward integration (Roadmap Phase 6).
+
+    Off by default. A project that has not opted in cannot reach a remote by accident,
+    whatever anyone approves - `never auto-push` is invariant 13.
+    """
+    enabled: bool           # nothing crosses the network until this is true
+    remote: str             # git remote to push to
+    base: str               # pull request base branch; "" means the remote's default
+    draft: bool             # open pull requests as drafts
+    on_approve: bool        # answering a `before_merge` gate delivers the work
+    directory: str          # delivery records directory, relative to project root or absolute
+
+
+class DelegationConfig(TypedDict, total=False):
+    """Configuration for carrying a decomposed goal out (Roadmap Phases 2-3)."""
+    max_parallel: int       # how many tasks may have a session in flight at once
+    stop_on_failure: bool   # abandon the remaining waves once any task fails
+    goals_directory: str    # goal store directory, relative to project root or absolute
+
+
+class PlanningMemoryConfig(TypedDict, total=False):
+    """What the decomposer is allowed to remember across goals (Roadmap 8.2)."""
+    enabled: bool           # off returns the cold decomposition this project did before 8.2
+    max_goals: int          # how far back the memory reads
+    budget_chars: int       # the ceiling on what it may add to the prompt
+
+
+class PlanningConfig(TypedDict, total=False):
+    """Configuration for goal decomposition (Roadmap Phase 1)."""
+    agent: Optional[str]    # which provider decomposes the goal; None inherits the planner's
+    model: Optional[str]    # which model it uses; None inherits the planner's
+    max_tasks: int          # ceiling on tasks in one plan
+    memory: PlanningMemoryConfig   # what it remembers of previous goals
 
 
 class OrchestratorConfig(TypedDict, total=False):
@@ -74,6 +166,16 @@ class OrchestratorConfig(TypedDict, total=False):
     run_store: Optional[RunStoreConfig]
     workspace: Optional[WorkspaceConfig]
     verification: Optional[VerificationConfig]
+    budget: Optional[BudgetConfig]
+    planning: Optional[PlanningConfig]
+    delegation: Optional[DelegationConfig]
+    approval: Optional[ApprovalConfig]
+    delivery: Optional[DeliveryConfig]
+
+
+#: A hard ceiling on `execution.retry.attempts`. A retry policy is insurance against a flaky
+#: call, not a way to turn one execution into an unbounded loop against a service that is down.
+MAX_RETRY_ATTEMPTS = 10
 
 
 class ConfigValidationError(ValueError):
@@ -132,6 +234,14 @@ DEFAULT_CONFIG: OrchestratorConfig = {
         },
     ],
     "roles": {
+        "decomposer": {
+            "responsibility": (
+                "Break the user's goal into the smallest set of focused, independently "
+                "deliverable tasks, with explicit dependencies, the areas each task is "
+                "expected to touch, and how each one would be judged done. Plan only: "
+                "never implement."
+            )
+        },
         "researcher": {
             "responsibility": (
                 "Investigate and analyze the supplied project context and user task. "
@@ -213,11 +323,99 @@ DEFAULT_WORKSPACE_CONFIG: WorkspaceConfig = {
     "isolation": "auto",
     "directory": ".orchestrator/worktrees",
     "commit_on_finish": True,
-    "keep_worktree": True,
+    # The branch is the artifact; the checkout is scaffolding. Keeping every
+    # worktree leaves a full second copy of the project per run, so the default
+    # is to remove it once the work is committed. A dirty worktree is kept
+    # regardless - see orchestrator.workspace.finish_worktree.
+    "keep_worktree": False,
+}
+
+#: The gate is off until a project names its own command: there is no command this
+#: orchestrator could guess that would be right for an arbitrary repository.
+DEFAULT_ACCEPTANCE_CONFIG: AcceptanceConfig = {
+    "command": "",
+    "timeout_seconds": 600,
+    "required": True,
+    "output_limit": 4000,
 }
 
 DEFAULT_VERIFICATION_CONFIG: VerificationConfig = {
     "consensus": "unanimous",
+    "acceptance": dict(DEFAULT_ACCEPTANCE_CONFIG),
+}
+
+#: Decomposition is not part of the `agents:` pipeline - it runs before one, and only when
+#: asked. It therefore carries its own agent selection rather than a pipeline entry.
+#: The planner's memory is on by default (Roadmap 9.2, answered: a Project accumulates
+#: knowledge across Goals). It is a projection over stores that already exist, it is bounded,
+#: and `--memory` prints exactly what it will say - so the cost of it being on is a few
+#: hundred tokens per decomposition, and the cost of it being off is deciding cold every time.
+#: Retries are on by default. The alternative was measured rather than assumed: across this
+#: project's own recorded history every real end-to-end failure was one agent returning empty
+#: output on the first step, with no second attempt. Three attempts with a widening gap is the
+#: cheapest thing that turns most of those into a completed run.
+DEFAULT_RETRY_CONFIG: RetryConfig = {
+    "attempts": 3,
+    "backoff_seconds": 2.0,
+    "max_backoff_seconds": 30.0,
+    "escalate_model": True,
+}
+
+DEFAULT_PLANNING_MEMORY_CONFIG: PlanningMemoryConfig = {
+    "enabled": True,
+    "max_goals": 12,
+    "budget_chars": 2400,
+}
+
+DEFAULT_PLANNING_CONFIG: PlanningConfig = {
+    "agent": None,   # None means "use whoever plans" - resolved by get_planning_config
+    "model": None,
+    "max_tasks": 12,
+    "memory": dict(DEFAULT_PLANNING_MEMORY_CONFIG),
+}
+
+#: 0 means unlimited. Off by default: a ceiling the user did not choose is a
+#: surprise mid-run halt, and the repair-attempt bound already prevents runaway
+#: looping. Set these to bound cost as well as attempts.
+DEFAULT_BUDGET_CONFIG: BudgetConfig = {
+    "max_total_tokens": 0,
+    "max_duration_seconds": 0,
+    "goal_max_total_tokens": 0,
+    "goal_max_duration_seconds": 0,
+}
+
+#: One task at a time by default. Parallelism is a real change in behaviour - several agents
+#: writing several worktrees at once - so it is something a user turns on, not something they
+#: discover after the fact.
+DEFAULT_DELEGATION_CONFIG: DelegationConfig = {
+    "max_parallel": 1,
+    "stop_on_failure": False,
+    "goals_directory": ".orchestrator/goals",
+}
+
+#: Every gate off by default. A gate the user did not ask for is a run that mysteriously
+#: stopped; `before_merge` is the one most projects will want first, because it costs nothing
+#: (the work is already done) and turns a pile of branches into a review queue.
+DEFAULT_APPROVAL_CONFIG: ApprovalConfig = {
+    "gates": {
+        "after_decomposition": False,
+        "before_task": False,
+        "before_merge": False,
+    },
+    "auto_approve": False,
+    "directory": ".orchestrator/approvals",
+}
+
+#: Nothing crosses the network until a project turns this on, and even then only a person
+#: can trigger it. Draft pull requests by default: the first thing a reviewer should see is
+#: that a machine wrote it and a human has not finished with it.
+DEFAULT_DELIVERY_CONFIG: DeliveryConfig = {
+    "enabled": False,
+    "remote": "origin",
+    "base": "",
+    "draft": True,
+    "on_approve": True,
+    "directory": ".orchestrator/delivery",
 }
 
 VALID_ISOLATION_MODES = ("auto", "worktree", "none")
@@ -408,6 +606,7 @@ def validate_config(raw_data: Any) -> OrchestratorConfig:
         "visible_terminals": False,
         "terminal_type": "auto",
         "pause_on_completion": 1.5,
+        "retry": dict(DEFAULT_RETRY_CONFIG),
     }
     if raw_exec is not None:
         if not isinstance(raw_exec, dict):
@@ -455,6 +654,51 @@ def validate_config(raw_data: Any) -> OrchestratorConfig:
             validated_execution["agent_execution_mode"] = mode
         else:
             validated_execution["agent_execution_mode"] = "auto"
+
+        if raw_exec.get("retry") is not None:
+            raw_retry = raw_exec["retry"]
+            if not isinstance(raw_retry, dict):
+                raise ConfigValidationError(
+                    "Configuration 'execution.retry' must be a dictionary/mapping."
+                )
+            retry: RetryConfig = dict(DEFAULT_RETRY_CONFIG)  # type: ignore[assignment]
+
+            if "attempts" in raw_retry:
+                attempts = raw_retry["attempts"]
+                if (
+                    not isinstance(attempts, int)
+                    or isinstance(attempts, bool)
+                    or attempts < 1
+                    or attempts > MAX_RETRY_ATTEMPTS
+                ):
+                    raise ConfigValidationError(
+                        "Configuration 'execution.retry.attempts' must be an integer between "
+                        f"1 and {MAX_RETRY_ATTEMPTS} (1 disables retrying)."
+                    )
+                retry["attempts"] = attempts
+
+            for key in ("backoff_seconds", "max_backoff_seconds"):
+                if key in raw_retry:
+                    value = raw_retry[key]
+                    if (
+                        isinstance(value, bool)
+                        or not isinstance(value, (int, float))
+                        or value < 0
+                    ):
+                        raise ConfigValidationError(
+                            f"Configuration 'execution.retry.{key}' must be a "
+                            "non-negative number."
+                        )
+                    retry[key] = float(value)  # type: ignore[literal-required]
+
+            if "escalate_model" in raw_retry:
+                if not isinstance(raw_retry["escalate_model"], bool):
+                    raise ConfigValidationError(
+                        "Configuration 'execution.retry.escalate_model' must be true or false."
+                    )
+                retry["escalate_model"] = raw_retry["escalate_model"]
+
+            validated_execution["retry"] = retry
 
     # 7. Validate skills settings
     raw_skills = raw_data.get("skills")
@@ -588,6 +832,247 @@ def validate_config(raw_data: Any) -> OrchestratorConfig:
                 )
             validated_verification["consensus"] = policy
 
+        raw_acceptance = raw_verification.get("acceptance")
+        validated_acceptance: AcceptanceConfig = dict(DEFAULT_ACCEPTANCE_CONFIG)  # type: ignore[assignment]
+        if raw_acceptance is not None:
+            if not isinstance(raw_acceptance, dict):
+                raise ConfigValidationError(
+                    "Configuration 'verification.acceptance' must be a dictionary/mapping."
+                )
+
+            if "command" in raw_acceptance:
+                command = raw_acceptance["command"]
+                if command is None:
+                    command = ""
+                if isinstance(command, (list, tuple)):
+                    if not all(isinstance(part, str) for part in command):
+                        raise ConfigValidationError(
+                            "Configuration 'verification.acceptance.command' must be a string or "
+                            "a list of strings."
+                        )
+                    command = [str(part) for part in command]
+                elif not isinstance(command, str):
+                    raise ConfigValidationError(
+                        "Configuration 'verification.acceptance.command' must be a string or a "
+                        "list of strings (e.g. 'pytest -q')."
+                    )
+                validated_acceptance["command"] = command
+
+            for key in ("timeout_seconds", "output_limit"):
+                if key in raw_acceptance:
+                    value = raw_acceptance[key]
+                    if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+                        raise ConfigValidationError(
+                            f"Configuration 'verification.acceptance.{key}' must be a positive integer."
+                        )
+                    validated_acceptance[key] = value
+
+            if "required" in raw_acceptance:
+                required = raw_acceptance["required"]
+                if not isinstance(required, bool):
+                    raise ConfigValidationError(
+                        "Configuration 'verification.acceptance.required' must be a boolean."
+                    )
+                validated_acceptance["required"] = required
+        validated_verification["acceptance"] = validated_acceptance
+
+    # 12. Validate the run budget (Tier 2 #11)
+    raw_budget = raw_data.get("budget")
+    validated_budget: BudgetConfig = dict(DEFAULT_BUDGET_CONFIG)  # type: ignore[assignment]
+    if raw_budget is not None:
+        if not isinstance(raw_budget, dict):
+            raise ConfigValidationError("Configuration 'budget' must be a dictionary/mapping.")
+        for key in (
+            "max_total_tokens",
+            "max_duration_seconds",
+            "goal_max_total_tokens",
+            "goal_max_duration_seconds",
+        ):
+            if key in raw_budget:
+                value = raw_budget[key]
+                if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                    raise ConfigValidationError(
+                        f"Configuration 'budget.{key}' must be a non-negative integer "
+                        "(0 means unlimited)."
+                    )
+                validated_budget[key] = value
+
+    # 13. Validate goal decomposition settings (Roadmap Phase 1)
+    raw_planning = raw_data.get("planning")
+    validated_planning: PlanningConfig = dict(DEFAULT_PLANNING_CONFIG)  # type: ignore[assignment]
+    if raw_planning is not None:
+        if not isinstance(raw_planning, dict):
+            raise ConfigValidationError("Configuration 'planning' must be a dictionary/mapping.")
+
+        if "agent" in raw_planning:
+            agent_name = str(raw_planning["agent"]).strip()
+            if not agent_name:
+                raise ConfigValidationError("Configuration 'planning.agent' must be a non-empty string.")
+            validated_planning["agent"] = agent_name
+
+        if "model" in raw_planning and raw_planning["model"] is not None:
+            model_name = str(raw_planning["model"]).strip()
+            agent_name = validated_planning.get("agent")
+            if not agent_name:
+                planner_entry = next(
+                    (a for a in validated_agents if a.get("role") == "planner"), {}
+                )
+                agent_name = planner_entry.get("agent") or "claude"
+            catalog = [m.get("id") for m in validated_models.get(agent_name, [])]
+            if catalog and model_name not in catalog:
+                raise ConfigValidationError(
+                    f"Invalid planning.model '{model_name}' for agent '{agent_name}'.\n"
+                    f"Available models: {', '.join(str(c) for c in catalog)}"
+                )
+            validated_planning["model"] = model_name
+
+        if "max_tasks" in raw_planning:
+            max_tasks = raw_planning["max_tasks"]
+            if not isinstance(max_tasks, int) or isinstance(max_tasks, bool) or max_tasks < 1:
+                raise ConfigValidationError(
+                    "Configuration 'planning.max_tasks' must be a positive integer."
+                )
+            validated_planning["max_tasks"] = max_tasks
+
+        if "memory" in raw_planning and raw_planning["memory"] is not None:
+            raw_memory = raw_planning["memory"]
+            if not isinstance(raw_memory, dict):
+                raise ConfigValidationError(
+                    "Configuration 'planning.memory' must be a dictionary/mapping."
+                )
+            memory_cfg: PlanningMemoryConfig = dict(DEFAULT_PLANNING_MEMORY_CONFIG)  # type: ignore[assignment]
+            if "enabled" in raw_memory:
+                if not isinstance(raw_memory["enabled"], bool):
+                    raise ConfigValidationError(
+                        "Configuration 'planning.memory.enabled' must be true or false."
+                    )
+                memory_cfg["enabled"] = raw_memory["enabled"]
+            for key in ("max_goals", "budget_chars"):
+                if key in raw_memory:
+                    value = raw_memory[key]
+                    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                        raise ConfigValidationError(
+                            f"Configuration 'planning.memory.{key}' must be a "
+                            "non-negative integer."
+                        )
+                    memory_cfg[key] = value  # type: ignore[literal-required]
+            validated_planning["memory"] = memory_cfg
+
+    # 14. Validate delegation settings (Roadmap Phases 2-3)
+    raw_delegation = raw_data.get("delegation")
+    validated_delegation: DelegationConfig = dict(DEFAULT_DELEGATION_CONFIG)  # type: ignore[assignment]
+    if raw_delegation is not None:
+        if not isinstance(raw_delegation, dict):
+            raise ConfigValidationError("Configuration 'delegation' must be a dictionary/mapping.")
+
+        if "max_parallel" in raw_delegation:
+            parallel = raw_delegation["max_parallel"]
+            if not isinstance(parallel, int) or isinstance(parallel, bool) or parallel < 1:
+                raise ConfigValidationError(
+                    "Configuration 'delegation.max_parallel' must be a positive integer "
+                    "(1 runs one task at a time)."
+                )
+            validated_delegation["max_parallel"] = parallel
+
+        if "stop_on_failure" in raw_delegation:
+            stop = raw_delegation["stop_on_failure"]
+            if not isinstance(stop, bool):
+                raise ConfigValidationError(
+                    "Configuration 'delegation.stop_on_failure' must be a boolean."
+                )
+            validated_delegation["stop_on_failure"] = stop
+
+        if "goals_directory" in raw_delegation:
+            directory = raw_delegation["goals_directory"]
+            if not isinstance(directory, str) or not directory.strip():
+                raise ConfigValidationError(
+                    "Configuration 'delegation.goals_directory' must be a non-empty string."
+                )
+            validated_delegation["goals_directory"] = directory.strip()
+
+    # 15. Validate approval gates (Roadmap Phase 5)
+    from orchestrator.approvals import VALID_GATES
+
+    raw_approval = raw_data.get("approval")
+    validated_approval: ApprovalConfig = {
+        "gates": dict(DEFAULT_APPROVAL_CONFIG["gates"]),
+        "auto_approve": DEFAULT_APPROVAL_CONFIG["auto_approve"],
+        "directory": DEFAULT_APPROVAL_CONFIG["directory"],
+    }
+    if raw_approval is not None:
+        if not isinstance(raw_approval, dict):
+            raise ConfigValidationError("Configuration 'approval' must be a dictionary/mapping.")
+
+        raw_gates = raw_approval.get("gates")
+        if raw_gates is not None:
+            if not isinstance(raw_gates, dict):
+                raise ConfigValidationError(
+                    "Configuration 'approval.gates' must be a dictionary/mapping."
+                )
+            for name, value in raw_gates.items():
+                if name not in VALID_GATES:
+                    raise ConfigValidationError(
+                        f"Unknown approval gate '{name}'. "
+                        f"Must be one of: {', '.join(VALID_GATES)}"
+                    )
+                if not isinstance(value, bool):
+                    raise ConfigValidationError(
+                        f"Configuration 'approval.gates.{name}' must be a boolean."
+                    )
+                validated_approval["gates"][name] = value
+
+        if "auto_approve" in raw_approval:
+            auto = raw_approval["auto_approve"]
+            if not isinstance(auto, bool):
+                raise ConfigValidationError(
+                    "Configuration 'approval.auto_approve' must be a boolean."
+                )
+            validated_approval["auto_approve"] = auto
+
+        if "directory" in raw_approval:
+            directory = raw_approval["directory"]
+            if not isinstance(directory, str) or not directory.strip():
+                raise ConfigValidationError(
+                    "Configuration 'approval.directory' must be a non-empty string."
+                )
+            validated_approval["directory"] = directory.strip()
+
+    # 16. Validate outward delivery (Roadmap Phase 6)
+    raw_delivery = raw_data.get("delivery")
+    validated_delivery: DeliveryConfig = dict(DEFAULT_DELIVERY_CONFIG)  # type: ignore[assignment]
+    if raw_delivery is not None:
+        if not isinstance(raw_delivery, dict):
+            raise ConfigValidationError("Configuration 'delivery' must be a dictionary/mapping.")
+
+        for flag in ("enabled", "draft", "on_approve"):
+            if flag in raw_delivery:
+                value = raw_delivery[flag]
+                if not isinstance(value, bool):
+                    raise ConfigValidationError(
+                        f"Configuration 'delivery.{flag}' must be a boolean."
+                    )
+                validated_delivery[flag] = value
+
+        for text_key in ("remote", "directory"):
+            if text_key in raw_delivery:
+                value = raw_delivery[text_key]
+                if not isinstance(value, str) or not value.strip():
+                    raise ConfigValidationError(
+                        f"Configuration 'delivery.{text_key}' must be a non-empty string."
+                    )
+                validated_delivery[text_key] = value.strip()
+
+        if "base" in raw_delivery:
+            base = raw_delivery["base"]
+            if base is None:
+                base = ""
+            if not isinstance(base, str):
+                raise ConfigValidationError(
+                    "Configuration 'delivery.base' must be a string "
+                    "(empty means the remote's default branch)."
+                )
+            validated_delivery["base"] = base.strip()
+
     return {
         "models": validated_models,
         "agents": validated_agents,
@@ -599,6 +1084,11 @@ def validate_config(raw_data: Any) -> OrchestratorConfig:
         "run_store": validated_store,
         "workspace": validated_workspace,
         "verification": validated_verification,
+        "budget": validated_budget,
+        "planning": validated_planning,
+        "delegation": validated_delegation,
+        "approval": validated_approval,
+        "delivery": validated_delivery,
     }
 
 
@@ -626,17 +1116,15 @@ def load_config(
         if not target_file.is_file():
             raise FileNotFoundError(f"Specified configuration file not found: {target_file}")
     else:
-        # Check in project_root or current working directory
-        search_dirs = []
-        if project_root:
-            search_dirs.append(Path(project_root).resolve())
-        search_dirs.append(Path(os.getcwd()).resolve())
-
-        for d in search_dirs:
-            candidate = d / "orchestrator.yaml"
-            if candidate.is_file():
-                target_file = candidate
-                break
+        # An explicit project_root is a claim about where to look, not a hint alongside cwd -
+        # a caller who names an empty directory means "there is no config here", and silently
+        # falling through to cwd anyway would read whatever the real project's config
+        # happens to contain instead of the DEFAULT_CONFIG that absence is supposed to mean.
+        # cwd is used only when the caller did not say where to look at all.
+        search_dir = Path(project_root).resolve() if project_root else Path(os.getcwd()).resolve()
+        candidate = search_dir / "orchestrator.yaml"
+        if candidate.is_file():
+            target_file = candidate
 
     if not target_file:
         return DEFAULT_CONFIG
@@ -784,6 +1272,7 @@ def get_execution_config(config: Optional[OrchestratorConfig]) -> ExecutionConfi
             "terminal_type": "auto",
             "pause_on_completion": 1.5,
             "agent_execution_mode": "auto",
+            "retry": dict(DEFAULT_RETRY_CONFIG),
         }
     exec_cfg = config["execution"]
     return {
@@ -791,7 +1280,42 @@ def get_execution_config(config: Optional[OrchestratorConfig]) -> ExecutionConfi
         "terminal_type": str(exec_cfg.get("terminal_type", "auto")),
         "pause_on_completion": float(exec_cfg.get("pause_on_completion", 1.5)),
         "agent_execution_mode": str(exec_cfg.get("agent_execution_mode", "auto")),
+        "retry": get_retry_config(config),
     }
+
+
+def get_retry_config(config: Optional[OrchestratorConfig]) -> RetryConfig:
+    """Retrieve the per-execution retry policy with safe fallbacks.
+
+    Args:
+        config: The loaded OrchestratorConfig or None.
+
+    Returns:
+        RetryConfig with every key populated. `attempts` is never below 1, so the worst a
+        malformed value can do is turn retries off - never turn one execution into a loop.
+    """
+    resolved: RetryConfig = dict(DEFAULT_RETRY_CONFIG)  # type: ignore[assignment]
+    if not config:
+        return resolved
+    exec_cfg = config.get("execution")
+    raw = exec_cfg.get("retry") if isinstance(exec_cfg, dict) else None
+    if not isinstance(raw, dict):
+        return resolved
+
+    try:
+        if "attempts" in raw:
+            resolved["attempts"] = max(1, min(int(raw["attempts"]), MAX_RETRY_ATTEMPTS))
+    except (TypeError, ValueError):
+        pass
+    for key in ("backoff_seconds", "max_backoff_seconds"):
+        try:
+            if key in raw:
+                resolved[key] = max(0.0, float(raw[key]))  # type: ignore[literal-required]
+        except (TypeError, ValueError):
+            pass
+    if isinstance(raw.get("escalate_model"), bool):
+        resolved["escalate_model"] = raw["escalate_model"]
+    return resolved
 
 
 def get_skill_config(config: Optional[OrchestratorConfig]) -> SkillConfig:
@@ -904,3 +1428,206 @@ def get_consensus_policy(config: Optional[OrchestratorConfig]) -> str:
         if policy in VALID_CONSENSUS_POLICIES:
             return policy
     return DEFAULT_VERIFICATION_CONFIG["consensus"]
+
+
+def get_budget_config(config: Optional[OrchestratorConfig]) -> BudgetConfig:
+    """Retrieve the run budget with safe fallbacks.
+
+    Args:
+        config: The loaded OrchestratorConfig or None.
+
+    Returns:
+        BudgetConfig with every key populated; 0 means unlimited.
+    """
+    resolved: BudgetConfig = dict(DEFAULT_BUDGET_CONFIG)  # type: ignore[assignment]
+    if not config:
+        return resolved
+    raw = config.get("budget")
+    if isinstance(raw, dict):
+        for key in (
+            "max_total_tokens",
+            "max_duration_seconds",
+            "goal_max_total_tokens",
+            "goal_max_duration_seconds",
+        ):
+            if key in raw:
+                try:
+                    resolved[key] = max(0, int(raw[key]))
+                except (TypeError, ValueError):
+                    pass
+    return resolved
+
+
+def get_acceptance_config(config: Optional[OrchestratorConfig]) -> AcceptanceConfig:
+    """Retrieve the acceptance gate configuration with safe fallbacks.
+
+    Args:
+        config: The loaded OrchestratorConfig or None.
+
+    Returns:
+        AcceptanceConfig with every key populated. An empty `command` means no gate.
+    """
+    resolved: AcceptanceConfig = dict(DEFAULT_ACCEPTANCE_CONFIG)  # type: ignore[assignment]
+    if not config:
+        return resolved
+    raw = config.get("verification")
+    if not isinstance(raw, dict):
+        return resolved
+    raw_acceptance = raw.get("acceptance")
+    if isinstance(raw_acceptance, dict):
+        if "command" in raw_acceptance and raw_acceptance["command"] is not None:
+            resolved["command"] = raw_acceptance["command"]
+        if "required" in raw_acceptance:
+            resolved["required"] = bool(raw_acceptance["required"])
+        for key in ("timeout_seconds", "output_limit"):
+            if key in raw_acceptance:
+                try:
+                    resolved[key] = max(1, int(raw_acceptance[key]))
+                except (TypeError, ValueError):
+                    pass
+    return resolved
+
+
+def get_planning_config(config: Optional[OrchestratorConfig]) -> PlanningConfig:
+    """Retrieve the decomposition configuration with safe fallbacks.
+
+    Falls back to the configured planner's agent and model when `planning` names none, so a
+    project that never configures decomposition still gets a sensible one.
+
+    Args:
+        config: The loaded OrchestratorConfig or None.
+
+    Returns:
+        PlanningConfig with every key populated.
+    """
+    resolved: PlanningConfig = dict(DEFAULT_PLANNING_CONFIG)  # type: ignore[assignment]
+    resolved["agent"] = "claude"
+    if not config:
+        return resolved
+
+    raw = config.get("planning") if isinstance(config.get("planning"), dict) else {}
+    planner = get_agent_config(config, role="planner") or {}
+    planner_agent = str(planner.get("agent") or "") or None
+    planner_model = planner.get("model")
+    if isinstance(planner_model, (list, tuple)):
+        # An escalation ladder's first rung is the planner's ordinary choice.
+        planner_model = planner_model[0] if planner_model else None
+
+    chosen_agent = str(raw.get("agent") or "").strip() or planner_agent or "claude"
+    resolved["agent"] = chosen_agent
+
+    if raw.get("model"):
+        resolved["model"] = str(raw["model"])
+    elif chosen_agent == planner_agent and planner_model:
+        # Inherit only when the decomposer runs on the same provider as the planner;
+        # a model id is meaningless across providers.
+        resolved["model"] = str(planner_model)
+    else:
+        resolved["model"] = None
+
+    if "max_tasks" in raw:
+        try:
+            resolved["max_tasks"] = max(1, int(raw["max_tasks"]))
+        except (TypeError, ValueError):
+            pass
+
+    memory: PlanningMemoryConfig = dict(DEFAULT_PLANNING_MEMORY_CONFIG)  # type: ignore[assignment]
+    raw_memory = raw.get("memory")
+    if isinstance(raw_memory, dict):
+        if isinstance(raw_memory.get("enabled"), bool):
+            memory["enabled"] = raw_memory["enabled"]
+        for key in ("max_goals", "budget_chars"):
+            try:
+                if key in raw_memory:
+                    memory[key] = max(0, int(raw_memory[key]))  # type: ignore[literal-required]
+            except (TypeError, ValueError):
+                pass
+    resolved["memory"] = memory
+    return resolved
+
+
+def get_delegation_config(config: Optional[OrchestratorConfig]) -> DelegationConfig:
+    """Retrieve the delegation configuration with safe fallbacks.
+
+    Args:
+        config: The loaded OrchestratorConfig or None.
+
+    Returns:
+        DelegationConfig with every key populated. `max_parallel` of 1 is the sequential case.
+    """
+    resolved: DelegationConfig = dict(DEFAULT_DELEGATION_CONFIG)  # type: ignore[assignment]
+    if not config:
+        return resolved
+    raw = config.get("delegation")
+    if isinstance(raw, dict):
+        if "max_parallel" in raw:
+            try:
+                resolved["max_parallel"] = max(1, int(raw["max_parallel"]))
+            except (TypeError, ValueError):
+                pass
+        if "stop_on_failure" in raw:
+            resolved["stop_on_failure"] = bool(raw["stop_on_failure"])
+        if raw.get("goals_directory"):
+            resolved["goals_directory"] = str(raw["goals_directory"])
+    return resolved
+
+
+def get_approval_config(config: Optional[OrchestratorConfig]) -> ApprovalConfig:
+    """Retrieve the approval gate configuration with safe fallbacks.
+
+    Args:
+        config: The loaded OrchestratorConfig or None.
+
+    Returns:
+        ApprovalConfig with every gate present, so callers never branch on a missing key.
+    """
+    resolved: ApprovalConfig = {
+        "gates": dict(DEFAULT_APPROVAL_CONFIG["gates"]),
+        "auto_approve": DEFAULT_APPROVAL_CONFIG["auto_approve"],
+        "directory": DEFAULT_APPROVAL_CONFIG["directory"],
+    }
+    if not config:
+        return resolved
+    raw = config.get("approval")
+    if isinstance(raw, dict):
+        raw_gates = raw.get("gates")
+        if isinstance(raw_gates, dict):
+            for name, value in raw_gates.items():
+                if name in resolved["gates"]:
+                    resolved["gates"][name] = bool(value)
+        if "auto_approve" in raw:
+            resolved["auto_approve"] = bool(raw["auto_approve"])
+        if raw.get("directory"):
+            resolved["directory"] = str(raw["directory"])
+    return resolved
+
+
+def gate_enabled(config: Optional[OrchestratorConfig], gate: str) -> bool:
+    """Return True when a named approval gate is switched on."""
+    return bool(get_approval_config(config)["gates"].get(gate, False))
+
+
+def get_delivery_config(config: Optional[OrchestratorConfig]) -> DeliveryConfig:
+    """Retrieve the outward delivery configuration with safe fallbacks.
+
+    Args:
+        config: The loaded OrchestratorConfig or None.
+
+    Returns:
+        DeliveryConfig with every key populated. A missing or unreadable section resolves to
+        `enabled: False`, so the failure mode of this accessor is "nothing is published".
+    """
+    resolved: DeliveryConfig = dict(DEFAULT_DELIVERY_CONFIG)  # type: ignore[assignment]
+    if not config:
+        return resolved
+    raw = config.get("delivery")
+    if isinstance(raw, dict):
+        for flag in ("enabled", "draft", "on_approve"):
+            if flag in raw:
+                resolved[flag] = bool(raw[flag])
+        for text_key in ("remote", "directory"):
+            if raw.get(text_key):
+                resolved[text_key] = str(raw[text_key])
+        if "base" in raw and raw["base"] is not None:
+            resolved["base"] = str(raw["base"]).strip()
+    return resolved

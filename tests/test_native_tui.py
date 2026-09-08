@@ -34,8 +34,8 @@ from orchestrator.agents.opencode_tui import (
     parse_model_spec,
     run_opencode_native_tui,
 )
-from orchestrator.config import ConfigValidationError, load_config, validate_config
-from orchestrator.graph import graph
+from orchestrator.config import DEFAULT_CONFIG, ConfigValidationError, load_config, validate_config
+from orchestrator.graph import build_graph
 from orchestrator.types import (
     AgentResult,
     create_agent_result,
@@ -320,7 +320,7 @@ class TestAgentResultAndWorkflowIntegration(unittest.TestCase):
                 "workspace": {"isolated": False, "path": tmp_dir},
             }
 
-            final_state = graph.invoke(state)
+            final_state = build_graph(DEFAULT_CONFIG).invoke(state)
 
             self.assertEqual(final_state.get("status"), "completed")
             self.assertEqual(final_state.get("verification_verdict"), "PASS")
