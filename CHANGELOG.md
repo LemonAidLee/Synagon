@@ -40,6 +40,30 @@ here, not 20, which is under the five-observation line `--stats` flags. The reas
 right; the evidence quoted for it was inflated, and that is exactly the class of error a
 corrupt dataset produces.
 
+### Added — an escalation ladder can cross providers (`agent:` as a list)
+
+`escalate_model` could only ever fall back *within one provider*, which was fine until the
+thing that failed was the provider. ARCHITECTURE.md §9.0 recorded the gap; this closes it.
+
+- **A rung is a pair, not a model.** Either `agent` or `model` may be a list, and
+  `config.ladder_rungs` is the single place that knows how they combine: rung *i* is
+  `(agent[i], model[i])`. Rung 0 runs the first attempt, rung N runs escalation step N, so both
+  a repair and a retry escalate rather than repeating what just failed.
+- **Mismatched list lengths are refused, not clamped.** Pairing a two-agent ladder with one
+  model would hand a model id to a provider whose catalog has never heard of it, silently, at
+  the moment a run is already failing.
+- **An agent name this orchestrator cannot run is now a configuration error.** It used to fall
+  through `get_runner` to Claude in silence — tolerable for a single agent, materially worse
+  for a ladder, where a mistyped fallback would "escalate" to an agent nobody chose.
+- **Preflight probes every rung**, the runner and terminal title are resolved per attempt, the
+  `agent_retry` event records `next_agent` beside `next_model`, the cockpit card follows
+  whichever rung the run actually reached, and verifier independence is checked across all
+  rungs — a ladder that escalates the verifier onto the implementer's pairing loses
+  independence exactly when it matters most.
+- **`tests/test_agent_ladder.py`** — 29 tests, including a full pipeline run in which the first
+  provider returns nothing on every attempt and the phase is rescued by the second, still
+  producing exactly one `AgentResult`.
+
 ### Fixed — the pipeline now survives a flaky agent
 
 This is the change that matters most in this release, and it came from reading the project's

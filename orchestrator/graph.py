@@ -50,6 +50,7 @@ from orchestrator.config import (
     get_run_store_config,
     get_skill_config,
     get_workspace_config,
+    ladder_rungs,
 )
 from orchestrator.context import collect_project_context, get_project_root
 from orchestrator.launcher import get_terminal_title
@@ -495,8 +496,11 @@ def make_role_node(
         if not agent_cfg:
             agent_cfg = {"agent": "claude"} # Fallback
 
-        agent_name = agent_cfg.get("agent", "claude")
-        model_name = agent_cfg.get("model")
+        # One ladder, not two. `ladder_rungs` pairs the entry's agent(s) with its model(s),
+        # so every rung is a complete answer to "who runs this, on what" and nothing here
+        # has to reason about the two lists separately.
+        rungs = ladder_rungs(agent_cfg)
+        agent_name, model_name = rungs[0]
         responsibility = get_role_responsibility(config, cfg_role)
 
         existing_results = list(state.get("agent_results") or [])
@@ -510,17 +514,14 @@ def make_role_node(
             default_tracer.log_phase_replayed(role_name, agent=agent_name)
             return {"repair_attempts": repair_attempts + 1} if is_repair else {}
 
-        # A model may be an escalation ladder: rung 0 for the initial attempt,
-        # rung N for repair attempt N. A repair node is executing attempt
-        # `repair_attempts + 1`, so it must escalate now rather than repeat the
-        # model that just failed.
-        model_ladder = list(model_name) if isinstance(model_name, list) else None
+        # Rung 0 runs the initial attempt, rung N runs repair attempt N. A repair node is
+        # executing attempt `repair_attempts + 1`, so it must escalate now rather than
+        # repeat the pairing that just failed.
+        has_ladder = len(rungs) > 1
         ladder_rung = 0
-        if model_ladder:
-            ladder_rung = min(
-                (repair_attempts + 1) if is_repair else 0, len(model_ladder) - 1
-            )
-            model_name = model_ladder[ladder_rung]
+        if has_ladder:
+            ladder_rung = min((repair_attempts + 1) if is_repair else 0, len(rungs) - 1)
+            agent_name, model_name = rungs[ladder_rung]
         task = state.get("task") or state.get("message", "")
         project_context = state.get("project_context", "(No project context supplied)")
         # Agents execute in the run's isolated worktree when there is one.
@@ -569,7 +570,7 @@ def make_role_node(
                 agent=agent_name,
                 model=model_name,
             )
-            term_title = get_terminal_title(agent_name, "repair", repair_attempt=repair_attempts)
+            title_args = ("repair", {"repair_attempt": repair_attempts})
         elif role_name == "researcher":
             prompt = build_researcher_prompt(
                 role_name, responsibility, project_context, task, skill_manifest
@@ -578,7 +579,7 @@ def make_role_node(
                 agent=agent_name, role=role_name, model=model_name, step_label="[2/6]",
                 title=agent_name.capitalize(), action="Investigating project..."
             )
-            term_title = get_terminal_title(agent_name, role_name)
+            title_args = (role_name, {})
         elif role_name == "planner":
             analysis = _join_role_outputs(existing_results, "researcher")
             prompt = build_planner_prompt(
@@ -588,7 +589,7 @@ def make_role_node(
                 agent=agent_name, role=role_name, model=model_name, step_label="[3/6]",
                 title=agent_name.capitalize(), action="Reviewing research..."
             )
-            term_title = get_terminal_title(agent_name, role_name)
+            title_args = (role_name, {})
         elif role_name == "implementer":
             analysis = _join_role_outputs(existing_results, "researcher")
             plan_text = _join_role_outputs(existing_results, "planner")
@@ -599,7 +600,7 @@ def make_role_node(
                 agent=agent_name, role=role_name, model=model_name, step_label="[4/6]",
                 title=agent_name.capitalize(), action="Implementing planned changes in workspace..."
             )
-            term_title = get_terminal_title(agent_name, role_name)
+            title_args = (role_name, {})
         elif role_name == "verifier":
             analysis = _join_role_outputs(existing_results, "researcher")
             plan_text = _join_role_outputs(existing_results, "planner")
@@ -629,7 +630,7 @@ def make_role_node(
                     latest_check(state.get("acceptance_checks"), repair_attempts)
                 ),
             )
-            term_title = get_terminal_title(agent_name, role_name, verification_attempt=verification_attempt)
+            title_args = (role_name, {"verification_attempt": verification_attempt})
         elif role_name == "decomposer":
             # Roadmap 8.2: the decomposer is the one role whose prompt carries what previous
             # goals recorded. Building it never fails a run - `memory_section` returns "" on
@@ -660,7 +661,7 @@ def make_role_node(
                 agent=agent_name, role=role_name, model=model_name, step_label="[2/3]",
                 title=agent_name.capitalize(), action="Breaking the goal into tasks...",
             )
-            term_title = get_terminal_title(agent_name, role_name)
+            title_args = (role_name, {})
         else:
             # Fallback for dynamic roles
             prompt = f"Role: {role_name}\nResponsibility: {responsibility}\nTask: {task}\nContext:\n{project_context}"
@@ -668,10 +669,9 @@ def make_role_node(
                 agent=agent_name, role=role_name, model=model_name, step_label="[?]",
                 title=agent_name.capitalize(), action=f"Executing {role_name} tasks..."
             )
-            term_title = get_terminal_title(agent_name, role_name)
+            title_args = (role_name, {})
 
         start_time = time.time()
-        runner = get_runner(agent_name)
 
         # An execution beginning is a fact too, and the only one that tells a reader who is
         # working right now rather than who has already finished.
@@ -699,7 +699,7 @@ def make_role_node(
         max_attempts = max(1, int(retry_cfg.get("attempts", 1)))
         base_backoff = float(retry_cfg.get("backoff_seconds", 0.0))
         max_backoff = float(retry_cfg.get("max_backoff_seconds", 30.0))
-        escalate = bool(retry_cfg.get("escalate_model", True)) and bool(model_ladder)
+        escalate = bool(retry_cfg.get("escalate_model", True)) and has_ladder
 
         attempt_failures: List[str] = []
         output_text = ""
@@ -711,6 +711,12 @@ def make_role_node(
         for attempt in range(1, max_attempts + 1):
             fatal_exception = None
             start_time = time.time()
+            # Resolved per attempt, not once: a rung names an agent as well as a model, so
+            # escalating can change which binary runs, and the terminal it runs in must say
+            # whose it is. When the ladder is models-only both are the same every time,
+            # which is the previous behaviour exactly.
+            runner = get_runner(agent_name)
+            term_title = get_terminal_title(agent_name, title_args[0], **title_args[1])
             try:
                 kwargs = {
                     "working_dir": project_root,
@@ -760,26 +766,29 @@ def make_role_node(
                 break
 
             # Widen the gap, and step down the ladder if one is configured. The next rung is
-            # a *stronger* model by convention, which is the same bet the repair ladder makes.
+            # a *stronger* pairing by convention, which is the same bet the repair ladder
+            # makes - and now the step can cross providers, which is the whole reason an
+            # agent may be a list. A researcher whose provider returns empty output on every
+            # attempt is not flaky, and no amount of retrying one model reaches past it.
             backoff = min(base_backoff * (2 ** (attempt - 1)), max_backoff)
-            next_model = model_name
-            if escalate and model_ladder and ladder_rung < len(model_ladder) - 1:
+            next_agent, next_model = agent_name, model_name
+            if escalate and ladder_rung < len(rungs) - 1:
                 ladder_rung += 1
-                next_model = model_ladder[ladder_rung]
+                next_agent, next_model = rungs[ladder_rung]
 
             default_tracer.log_agent_retry(
                 agent=agent_name, role=role_name, attempt=attempt, of=max_attempts,
                 reason=reason, model=model_name, next_model=next_model,
-                backoff_seconds=backoff,
+                next_agent=next_agent, backoff_seconds=backoff,
             )
             if store is not None:
                 store.record_agent_retry(
                     agent=agent_name, role=role_name, attempt=attempt, of=max_attempts,
                     reason=reason, model=model_name, next_model=next_model,
-                    backoff_seconds=backoff,
+                    next_agent=next_agent, backoff_seconds=backoff,
                 )
 
-            model_name = next_model
+            agent_name, model_name = next_agent, next_model
             if backoff > 0:
                 time.sleep(backoff)
 

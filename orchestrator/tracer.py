@@ -282,16 +282,26 @@ class ExecutionTracer:
         reason: str,
         model: Optional[str] = None,
         next_model: Optional[str] = None,
+        next_agent: Optional[str] = None,
         backoff_seconds: float = 0.0,
     ) -> None:
         """Report that an execution failed and is about to be attempted again.
 
         Said on the console rather than swallowed: a run that pauses for eight seconds with
         no explanation looks hung, and a retry that nobody can see is a cost nobody can audit.
+
+        When the ladder crosses providers the *agent* changes too, and the line says so:
+        "-> claude/sonnet" is a materially different event from "-> sonnet", and a reader who
+        cannot tell them apart cannot tell which fallback actually rescued the run.
         """
-        switching = (
-            f" -> {next_model}" if next_model and next_model != model else ""
-        )
+        changed_agent = bool(next_agent and next_agent != agent)
+        changed_model = bool(next_model and next_model != model)
+        if changed_agent:
+            switching = f" -> {next_agent}/{next_model}" if next_model else f" -> {next_agent}"
+        elif changed_model:
+            switching = f" -> {next_model}"
+        else:
+            switching = ""
         self._emit(
             WorkflowEvent(
                 name="agent_retry",
@@ -312,6 +322,7 @@ class ExecutionTracer:
                     "reason": reason,
                     "model": model,
                     "next_model": next_model,
+                    "next_agent": next_agent,
                     "backoff_seconds": backoff_seconds,
                 },
             ),

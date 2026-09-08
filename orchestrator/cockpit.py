@@ -24,6 +24,7 @@ What it does not do
 
 from typing import Any, Dict, List, Optional
 
+from orchestrator.config import ladder_rungs
 from orchestrator.teams import phases_of
 
 #: An agent that has not been launched in the run being watched.
@@ -57,6 +58,42 @@ def _model_label(model: Any) -> str:
     if isinstance(model, list):
         return " -> ".join(str(m) for m in model if str(m).strip())
     return str(model or "")
+
+
+def _agent_label(agent: Any) -> str:
+    """How an agent, or a ladder of them, reads on a card. Pure."""
+    if isinstance(agent, list):
+        return " -> ".join(str(a) for a in agent if str(a).strip())
+    return str(agent or "")
+
+
+def _latest_state(
+    states: Dict[str, Dict[str, Any]],
+    rungs: List[Any],
+    role: Optional[str],
+) -> Dict[str, Any]:
+    """The live state for a card, across every agent its ladder could run as. Pure.
+
+    Events are keyed by the agent that actually ran, so a card whose ladder escalated has
+    state under two different keys. The one that happened *last* is the card's state; ties
+    and absences fall back to an empty dict, which reads as idle.
+    """
+    best: Dict[str, Any] = {}
+    best_sequence = -1
+    for agent, _model in rungs:
+        candidate = states.get("%s/%s" % (agent, role))
+        if not candidate:
+            continue
+        sequence = candidate.get("finished_sequence")
+        if sequence is None:
+            sequence = candidate.get("started_sequence")
+        try:
+            sequence = int(sequence)
+        except (TypeError, ValueError):
+            sequence = 0
+        if sequence >= best_sequence:
+            best, best_sequence = candidate, sequence
+    return best
 
 
 def agent_states(events: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
@@ -141,16 +178,24 @@ def columns(
     for phase in phases:
         cards: List[Dict[str, Any]] = []
         for index, entry in enumerate(phase.get("agents") or []):
-            key = "%s/%s" % (entry.get("agent"), entry.get("role"))
-            live = states.get(key) or {}
+            rungs = ladder_rungs(entry)
+            first_agent = rungs[0][0]
+            key = "%s/%s" % (first_agent, entry.get("role"))
+            # An agent ladder means one card can be worked by more than one agent, so the
+            # card follows whichever rung the run actually reached - the most recent event
+            # wins. Reading rung 0 alone would draw an escalated card as still idle.
+            live = _latest_state(states, rungs, entry.get("role"))
             cards.append(
                 {
-                    "key": agent_key(entry.get("agent"), entry.get("role"), index),
-                    "agent": entry.get("agent"),
+                    "key": agent_key(first_agent, entry.get("role"), index),
+                    "agent": live.get("agent") or first_agent,
+                    "configured_agent": entry.get("agent"),
+                    "agent_label": _agent_label(entry.get("agent")),
                     "role": entry.get("role"),
                     "model": entry.get("model"),
                     "model_label": _model_label(entry.get("model")),
-                    "ladder": isinstance(entry.get("model"), list),
+                    "ladder": len(rungs) > 1,
+                    "ladder_depth": len(rungs),
                     "state": live.get("state") or AGENT_IDLE,
                     "verdict": live.get("verdict"),
                     "error": live.get("error"),

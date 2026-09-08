@@ -36,6 +36,7 @@ from orchestrator.config import (
     OrchestratorConfig,
     get_acceptance_config,
     get_available_models,
+    ladder_rungs,
     validate_model,
 )
 
@@ -308,21 +309,30 @@ def check_verifier_independence(config: Optional[OrchestratorConfig]) -> List[st
         if not others:
             continue
         for verifier in verifiers:
+            verifier_rungs = ladder_rungs(verifier)
             for other in others:
-                same_agent = verifier.get("agent") == other.get("agent")
-                same_model = _model_label(verifier.get("model")) == _model_label(other.get("model"))
-                if same_agent and same_model:
-                    detail = (
-                        "the verifier is grading a plan its own model wrote"
-                        if other_role == "planner"
-                        else "the verifier is reviewing its own implementation"
-                    )
-                    warnings.append(
-                        f"verifier independence: the verifier and the {other_role} both use "
-                        f"{verifier.get('agent')}/{_model_label(verifier.get('model'))}, so "
-                        f"{detail}. Assign a different agent or model to one of them for an "
-                        f"independent check."
-                    )
+                # Any shared rung, not just the first pairing. A ladder that escalates the
+                # verifier onto the implementer's model loses independence at exactly the
+                # moment it matters most - the run has already gone wrong twice - and a check
+                # that only read rung 0 would call that setup independent.
+                shared = [r for r in verifier_rungs if r in ladder_rungs(other)]
+                if not shared:
+                    continue
+                detail = (
+                    "the verifier is grading a plan its own model wrote"
+                    if other_role == "planner"
+                    else "the verifier is reviewing its own implementation"
+                )
+                pairing = ", ".join(
+                    f"{agent}/{model or '(CLI default)'}" for agent, model in shared
+                )
+                only_on_escalation = shared[0] != verifier_rungs[0]
+                when = " on escalation" if only_on_escalation else ""
+                warnings.append(
+                    f"verifier independence: the verifier and the {other_role} both use "
+                    f"{pairing}{when}, so {detail}. Assign a different agent or model to one "
+                    f"of them for an independent check."
+                )
     return warnings
 
 
@@ -389,31 +399,36 @@ def run_preflight(
     # Deep-probe each distinct binary only once, however many roles use it.
     version_cache: Dict[str, Optional[str]] = {}
 
+    # Every rung, not just the first. A ladder's fallback is only ever reached on a bad day,
+    # which is the worst possible moment to discover its binary is missing - the entire point
+    # of preflight is that a run does not fail halfway for something knowable up front.
     for entry in agents:
-        agent = entry.get("agent") or ""
         role = entry.get("role") or ""
-        model = entry.get("model")
-
-        use_deep = deep and agent not in version_cache
-        probe = probe_agent(
-            agent=agent,
-            role=role,
-            model=model,
-            config=config,
-            deep=use_deep,
-            timeout=timeout,
-        )
-        if use_deep:
-            version_cache[agent] = probe.get("version")
-        elif deep and probe.get("executable"):
-            # Reuse the cached version rather than re-invoking the same binary.
-            cached = version_cache.get(agent)
-            probe["version"] = cached
-            if cached:
-                probe.setdefault("checks", []).append(
-                    _check("version", True, f"{cached} (cached)")
-                )
-        probes.append(probe)
+        rungs = ladder_rungs(entry)
+        for rung, (agent, model) in enumerate(rungs):
+            use_deep = deep and agent not in version_cache
+            probe = probe_agent(
+                agent=agent,
+                role=role,
+                model=model,
+                config=config,
+                deep=use_deep,
+                timeout=timeout,
+            )
+            if len(rungs) > 1:
+                probe["ladder_rung"] = rung
+                probe["ladder_depth"] = len(rungs)
+            if use_deep:
+                version_cache[agent] = probe.get("version")
+            elif deep and probe.get("executable"):
+                # Reuse the cached version rather than re-invoking the same binary.
+                cached = version_cache.get(agent)
+                probe["version"] = cached
+                if cached:
+                    probe.setdefault("checks", []).append(
+                        _check("version", True, f"{cached} (cached)")
+                    )
+            probes.append(probe)
 
     errors: List[str] = []
     warnings: List[str] = []

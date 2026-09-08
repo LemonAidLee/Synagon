@@ -15,9 +15,16 @@ class ModelConfig(TypedDict):
 
 
 class AgentConfig(TypedDict, total=False):
-    """Configuration definition for an agent assigned to a role."""
-    agent: str
-    model: Optional[str]
+    """Configuration definition for an agent assigned to a role.
+
+    Both `agent` and `model` may be a **list**, forming an escalation ladder: rung 0 runs
+    the initial attempt and rung N runs escalation step N, clamped to the last rung. When
+    both are lists they are zipped, so rung i is the pair ``(agent[i], model[i])`` — a model
+    id only ever means something next to the agent whose catalog defines it. See
+    `ladder_rungs`.
+    """
+    agent: Any               # str, or a list of them - a ladder of agents
+    model: Optional[Any]     # str, a list of them, or None
     role: str
 
 
@@ -422,6 +429,70 @@ VALID_ISOLATION_MODES = ("auto", "worktree", "none")
 VALID_CONSENSUS_POLICIES = ("unanimous", "majority", "any")
 
 
+def ladder_rungs(entry: Any) -> List[Any]:
+    """Every ``(agent, model)`` pair one configured entry can run as, rung by rung. Pure.
+
+    An escalation ladder used to be a property of the model alone, which meant a role could
+    only ever fall back *within one provider*. When the researcher's single model returned
+    empty output on every attempt (§9.0) there was nowhere to escalate to, and the run died
+    at step one. Making `agent` a list too is the same idea one level up, and expressing
+    both as one list of rungs is what keeps every consumer - the graph, preflight, the
+    cockpit, the design surface - from growing its own opinion about how the two pair up.
+
+    The pairing rule, in full:
+
+    ============================  ==================================================
+    ``agent: claude``             one rung: ``[("claude", None)]``
+    ``model: [a, b]``             two rungs, same agent
+    ``agent: [x, y]``             two rungs, each with its own default model
+    ``agent: [x, y]``,            two rungs, zipped: ``[("x", "a"), ("y", "b")]``
+    ``model: [a, b]``
+    ``agent: [x, y]``,            two rungs, both on model ``a`` (usually a mistake,
+    ``model: a``                  and one the catalog check will catch)
+    ============================  ==================================================
+
+    Mismatched list lengths are refused at validation rather than clamped here, so this
+    never has to invent a pairing.
+
+    Returns:
+        A non-empty list of ``(agent_name, model_id_or_None)`` tuples.
+    """
+    if not isinstance(entry, dict):
+        return [("claude", None)]
+
+    raw_agent = entry.get("agent")
+    agents = (
+        [str(a).strip() for a in raw_agent if str(a).strip()]
+        if isinstance(raw_agent, (list, tuple))
+        else [str(raw_agent or "claude").strip() or "claude"]
+    ) or ["claude"]
+
+    raw_model = entry.get("model")
+    if isinstance(raw_model, (list, tuple)):
+        models: List[Optional[str]] = [
+            (str(m).strip() or None) for m in raw_model
+        ] or [None]
+    else:
+        models = [str(raw_model).strip() or None if raw_model else None]
+
+    depth = max(len(agents), len(models))
+    return [
+        (agents[min(i, len(agents) - 1)], models[min(i, len(models) - 1)])
+        for i in range(depth)
+    ]
+
+
+def rung_at(entry: Any, index: int) -> Any:
+    """The ``(agent, model)`` pair for escalation step `index`, clamped to the last rung. Pure."""
+    rungs = ladder_rungs(entry)
+    return rungs[max(0, min(int(index), len(rungs) - 1))]
+
+
+def ladder_depth(entry: Any) -> int:
+    """How many rungs an entry has. 1 means there is nowhere to escalate to. Pure."""
+    return len(ladder_rungs(entry))
+
+
 def validate_config(raw_data: Any) -> OrchestratorConfig:
     """Validate raw parsed dictionary against OrchestratorConfig schema.
 
@@ -453,9 +524,27 @@ def validate_config(raw_data: Any) -> OrchestratorConfig:
         if "role" not in item or not str(item["role"]).strip():
             raise ConfigValidationError(f"agents[{idx}] is missing required non-empty 'role' field.")
 
-        # A model may be a single id, or a list of ids forming an escalation
-        # ladder: index 0 is used for the initial attempt, index N for repair
-        # attempt N (clamped to the last entry). See make_role_node.
+        # Either field may be a single value or a list forming an escalation ladder:
+        # index 0 for the initial attempt, index N for escalation step N (clamped to the
+        # last entry). See `ladder_rungs` and make_role_node.
+        raw_agent = item.get("agent")
+        if isinstance(raw_agent, (list, tuple)):
+            if not raw_agent:
+                raise ConfigValidationError(
+                    f"agents[{idx}] has an empty 'agent' list. Provide at least one agent "
+                    f"name."
+                )
+            agent_ladder = []
+            for a_idx, entry in enumerate(raw_agent):
+                if not isinstance(entry, (str, int, float)) or not str(entry).strip():
+                    raise ConfigValidationError(
+                        f"agents[{idx}].agent[{a_idx}] must be a non-empty agent name."
+                    )
+                agent_ladder.append(str(entry).strip())
+            agent_value: Any = agent_ladder
+        else:
+            agent_value = str(raw_agent).strip()
+
         raw_model = item.get("model")
         model_value: Optional[Any]
         if isinstance(raw_model, (list, tuple)):
@@ -477,8 +566,23 @@ def validate_config(raw_data: Any) -> OrchestratorConfig:
         else:
             model_value = None
 
+        # Two ladders of different lengths have no correct pairing. Clamping the shorter
+        # one would silently hand a model id to an agent whose catalog has never heard of
+        # it, which is the one mistake this pairing exists to make impossible.
+        if isinstance(agent_value, list) and isinstance(model_value, list):
+            if len(agent_value) != len(model_value):
+                raise ConfigValidationError(
+                    f"agents[{idx}] lists {len(agent_value)} agent(s) and "
+                    f"{len(model_value)} model(s). When both are ladders they are paired "
+                    f"rung by rung, so they must be the same length - a model id only means "
+                    f"something next to the agent whose catalog defines it.\n\n"
+                    f"  - agent: [antigravity, claude]\n"
+                    f"    model: [gemini-3.8-flash-high, sonnet]\n"
+                    f"    role: researcher"
+                )
+
         agent_entry: AgentConfig = {
-            "agent": str(item["agent"]).strip(),
+            "agent": agent_value,
             "role": str(item["role"]).strip(),
             "model": model_value,
         }
@@ -554,22 +658,34 @@ def validate_config(raw_data: Any) -> OrchestratorConfig:
         # Provide default catalog copy
         validated_models = {k: list(v) for k, v in DEFAULT_CONFIG.get("models", {}).items()}
 
-    # 4. Validate agent model selection against catalog.
-    #    Every rung of an escalation ladder is validated independently.
-    for agent_entry in validated_agents:
-        agent_name = agent_entry["agent"]
-        configured = agent_entry.get("model")
-        if not configured or agent_name not in validated_models:
-            continue
+    # 4. Validate every rung against the catalog.
+    #
+    #    A rung is an (agent, model) pair, and both halves are checked: an agent name this
+    #    orchestrator cannot run used to fall through `graph.get_runner` to Claude in
+    #    silence, which a ladder makes materially worse - a mistyped fallback rung would
+    #    "escalate" to an agent nobody chose and the run would look fine.
+    for idx, agent_entry in enumerate(validated_agents):
+        rungs = ladder_rungs(agent_entry)
+        for rung, (agent_name, model_id) in enumerate(rungs):
+            position = (
+                f" (escalation step {rung + 1} of {len(rungs)})" if len(rungs) > 1 else ""
+            )
 
-        ladder = configured if isinstance(configured, list) else [configured]
-        allowed = [m["id"] for m in validated_models[agent_name]]
-        if not allowed:
-            continue
+            if agent_name not in validated_models:
+                known = "\n".join(f"  - {name}" for name in sorted(validated_models))
+                raise ConfigValidationError(
+                    f"\nConfiguration Error\n\n"
+                    f"agents[{idx}] names the agent '{agent_name}'{position}, which is not a "
+                    f"provider in the model catalog.\n\n"
+                    f"Known agents:\n{known}\n\n"
+                    f"Check the spelling, or add '{agent_name}' to the 'models' catalog in "
+                    f"orchestrator.yaml."
+                )
 
-        for rung, model_id in enumerate(ladder):
-            if model_id in allowed:
+            allowed = [m["id"] for m in validated_models[agent_name]]
+            if not model_id or not allowed or model_id in allowed:
                 continue
+
             formatted_available = "\n".join(f"  - {m_id}" for m_id in allowed)
             if agent_name == "opencode":
                 extra_hint = (
@@ -579,7 +695,6 @@ def validate_config(raw_data: Any) -> OrchestratorConfig:
             else:
                 extra_hint = "Edit orchestrator.yaml and select one of the available model IDs."
 
-            position = f" (escalation step {rung + 1} of {len(ladder)})" if len(ladder) > 1 else ""
             raise ConfigValidationError(
                 f"\nConfiguration Error\n\n"
                 f"Agent: {agent_name}\n"

@@ -334,6 +334,7 @@ class RunStore:
         reason: str,
         model: Optional[Any] = None,
         next_model: Optional[Any] = None,
+        next_agent: Optional[Any] = None,
         backoff_seconds: float = 0.0,
     ) -> None:
         """Record that one execution failed and is being attempted again.
@@ -342,6 +343,11 @@ class RunStore:
         recorded as its own event rather than as another `agent_result` because the phase
         produced *one* outcome, and a reader counting results to resolve consensus or to
         compute a pass rate must not see a retried execution as an ensemble of three.
+
+        `next_agent` is recorded beside `next_model` because an escalation ladder may cross
+        providers: which agent the run fell back *to* is the fact that makes a rescued run
+        readable afterwards, and deriving it from the following `agent_result` would only
+        work when the fallback succeeded.
         """
         self._append(
             EVENT_AGENT_RETRY,
@@ -353,6 +359,7 @@ class RunStore:
                 "reason": reason,
                 "model": model,
                 "next_model": next_model,
+                "next_agent": next_agent,
                 "backoff_seconds": round(float(backoff_seconds), 2),
             },
         )

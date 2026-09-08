@@ -23,11 +23,21 @@ agents:
   #
   # That single failure was 7 of 7 real end-to-end failures this project ever recorded, and
   # retrying cannot fix it because it is deterministic, not flaky (6 consecutive attempts, 6
-  # empty replies). `--stats` shows claude/sonnet has filled this role 20 times here with a 0%
-  # error rate, so this is the evidence-based swap rather than a guess.
+  # empty replies). On the cleaned run store (`--archive-runs` removed 141 suite artifacts
+  # that were 86% of the dataset), `--stats` puts antigravity/gemini-3.8-flash-high at a 90%
+  # error rate over 10 runs in this role, against 0% for claude/sonnet over 3. The first
+  # number is the evidence; the second is still below the five-observation line `--stats`
+  # flags, and an earlier version of this comment claimed 20 runs for it - that figure came
+  # from the polluted store and was never true.
   #
-  # To put Antigravity back, restore the two lines below - and give it a model ladder, so
-  # `execution.retry.escalate_model` has somewhere to escalate to.
+  # To put Antigravity back, make it the first rung of a ladder rather than the only choice:
+  #
+  #   - agent: [antigravity, claude]
+  #     model: [gemini-3.8-flash-high, sonnet]
+  #     role: researcher
+  #
+  # `execution.retry.escalate_model` then steps across providers when the first one returns
+  # nothing, which is the specific failure above (ARCHITECTURE.md §9.2).
   - agent: claude
     model: sonnet
     role: researcher

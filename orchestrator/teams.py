@@ -42,6 +42,7 @@ import yaml
 from orchestrator.config import (
     ConfigValidationError,
     get_max_repair_attempts,
+    ladder_rungs,
     validate_config,
 )
 
@@ -237,7 +238,12 @@ def normalize_team(team: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     for raw in team.get("agents") or []:
         if not isinstance(raw, dict):
             continue
-        agent = str(raw.get("agent") or "").strip()
+        raw_agent = raw.get("agent")
+        if isinstance(raw_agent, list):
+            rungs = [str(a).strip() for a in raw_agent if str(a).strip()]
+            agent: Any = rungs if len(rungs) > 1 else (rungs[0] if rungs else "")
+        else:
+            agent = str(raw_agent or "").strip()
         role = str(raw.get("role") or "").strip()
         if not agent or not role:
             continue
@@ -245,7 +251,14 @@ def normalize_team(team: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         model = raw.get("model")
         if isinstance(model, list):
             ladder = [str(m).strip() for m in model if str(m).strip()]
-            model_value: Any = ladder if len(ladder) > 1 else (ladder[0] if ladder else None)
+            # A one-entry list normally means "a ladder the editor has not filled in yet",
+            # and collapsing it keeps the written YAML plain. Beside an *agent* ladder it
+            # means something else - one model for several providers - so the shape is kept
+            # and `validate_team` gets to say the lengths do not pair up.
+            collapse = len(ladder) <= 1 and not isinstance(agent, list)
+            model_value: Any = (
+                (ladder[0] if ladder else None) if collapse else (ladder or None)
+            )
         elif isinstance(model, str) and model.strip():
             model_value = model.strip()
         else:
@@ -296,20 +309,40 @@ def validate_team(team: Dict[str, Any], config: Optional[Dict[str, Any]] = None)
         )
 
     for index, entry in enumerate(agents, start=1):
-        agent = str(entry.get("agent") or "")
         role = str(entry.get("role") or "")
         if roles and role not in roles:
             problems.append(
                 f"Agent {index}: role '{role}' has no responsibility defined under roles:."
             )
-        if catalog and agent not in catalog:
-            problems.append(f"Agent {index}: '{agent}' is not a provider in the model catalog.")
+
+        # Both fields may be ladders, and `ladder_rungs` is the one place that knows how the
+        # two pair up. Mismatched lengths are refused before the rungs are read, because a
+        # zip that silently truncates would validate a pairing the run will never make.
+        raw_agent = entry.get("agent")
+        raw_model = entry.get("model")
+        if (
+            isinstance(raw_agent, list)
+            and isinstance(raw_model, list)
+            and len(raw_agent) != len(raw_model)
+        ):
+            problems.append(
+                f"Agent {index}: {len(raw_agent)} agents and {len(raw_model)} models. A "
+                f"ladder pairs them rung by rung, so the two lists must be the same length."
+            )
             continue
-        known = {str(m.get("id")) for m in catalog.get(agent, [])}
-        models = entry.get("model")
-        for model in (models if isinstance(models, list) else [models] if models else []):
-            if known and str(model) not in known:
-                problems.append(f"Agent {index}: '{agent}' has no model '{model}' in the catalog.")
+
+        for rung, (agent, model) in enumerate(ladder_rungs(entry), start=1):
+            where = f" (step {rung})" if isinstance(raw_agent, list) or isinstance(raw_model, list) else ""
+            if catalog and agent not in catalog:
+                problems.append(
+                    f"Agent {index}{where}: '{agent}' is not a provider in the model catalog."
+                )
+                continue
+            known = {str(m.get("id")) for m in catalog.get(agent, [])}
+            if model and known and str(model) not in known:
+                problems.append(
+                    f"Agent {index}{where}: '{agent}' has no model '{model}' in the catalog."
+                )
 
     for phase in phases_of(agents):
         if phase["role"] == "implementer" and len(phase["agents"]) > 1:

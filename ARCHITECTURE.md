@@ -511,10 +511,10 @@ across every recorded failure. The role was reassigned on that evidence (§27 re
 well as a remedy.** An execution that fails three times with a widening gap has told you
 something a single failure could not.
 
-There is a real gap left here. `escalate_model` steps down a *model* ladder, so it can only
-fall back within one provider; when the researcher had a single model configured there was
-nowhere to escalate to. Letting a role's `agent:` be a list — the way `model:` already can be —
-is the natural next step, and is not built.
+That diagnosis exposed the gap `escalate_model` could not cover: it steps down a *model*
+ladder, so it can only fall back **within one provider**, and the thing that failed here was
+the provider. A role with one model configured had nowhere to escalate to. §9.2 is now the
+answer — a role's `agent:` may be a list, the way `model:` already could.
 
 ### 9.1 The loop
 
@@ -525,15 +525,53 @@ so a quorum re-evaluates the repaired workspace rather than one member speaking 
 
 ### 9.2 Escalation ladders
 
-A `model` may be a list. Rung 0 runs the initial attempt; rung N runs repair attempt N
-(clamped to the last rung). A repair therefore escalates instead of re-running the model that
-just failed. Every rung is validated against the catalog at load time.
+**A rung is a pair, not a model.** Either `agent` or `model` may be a list, and
+`config.ladder_rungs` is the single place that knows how the two combine: rung *i* is the
+pair `(agent[i], model[i])`. Rung 0 runs the initial attempt; rung N runs escalation step N,
+clamped to the last rung — so both a repair (§9.1) and a retry (§9.0) escalate rather than
+repeating the pairing that just failed. Every rung is validated at load time, both halves of
+it: the model against *that rung's* agent's catalog, and the agent against the set this
+orchestrator can actually run.
 
 ```yaml
-  - agent: opencode
+  - agent: opencode                                    # one agent, three models
     model: [opencode/big-pickle, anthropic/claude-sonnet-4-5, opencode/gpt-5.1-codex]
     role: implementer
+
+  - agent: [antigravity, claude]                       # across providers
+    model: [gemini-3.8-flash-high, sonnet]
+    role: researcher
 ```
+
+The pairing rule in full:
+
+| Configuration | Rungs |
+| --- | --- |
+| `agent: claude`, `model: sonnet` | `[(claude, sonnet)]` |
+| `agent: claude`, `model: [a, b]` | `[(claude, a), (claude, b)]` |
+| `agent: [x, y]`, no `model` | `[(x, None), (y, None)]` — each provider's own default |
+| `agent: [x, y]`, `model: [a, b]` | `[(x, a), (y, b)]` |
+| `agent: [x, y]`, `model: [a]` | **refused** |
+
+That last row is the one design decision worth stating. Clamping the shorter list would hand
+a model id to an agent whose catalog has never heard of it, silently, at the exact moment a
+run is already failing — so mismatched lengths are a configuration error rather than an
+inferred pairing. A model id only means something next to its own provider.
+
+Three consequences follow from a rung naming an agent:
+
+* **The runner is resolved per attempt**, not once per phase, and the terminal title is
+  rebuilt with it — a window that says `Antigravity Researcher` while Claude runs in it is a
+  lie the cockpit would then repeat.
+* **Preflight probes every rung** (§6), not just the first. A fallback is only ever reached on
+  a bad day, which is the worst possible moment to discover its binary is missing.
+* **The retry event records `next_agent`** beside `next_model` (§11.1). Which provider a run
+  fell back *to* is what makes a rescued run readable afterwards, and it cannot be derived
+  from the following `agent_result` — that only exists when the fallback worked.
+
+Verifier independence (§6) is checked across rungs too: a ladder that escalates the verifier
+onto the implementer's exact pairing loses independence at the moment it matters most, and a
+check that read only rung 0 would call that setup independent.
 
 ### 9.3 Budgets
 
@@ -1844,6 +1882,12 @@ the single `runner(...)` call, and its whole contract is that the phase still em
 `AgentResult` (§9.0). A new failure mode belongs *inside* that loop as another `reason`, never
 as a second result appended to `agent_results` — the moment a retry becomes a row in that list,
 consensus and `--stats` are both silently wrong.
+
+**Changing what an escalation ladder is.** `config.ladder_rungs` is the only function that
+turns a configured entry into `(agent, model)` pairs, and every consumer — the graph, preflight,
+the cockpit, the design surface — reads pairs from it. Adding a third thing a rung can carry
+means changing that function and nothing else; deriving rungs a second time anywhere is how the
+graph and the preflight report come to disagree about what will actually run (§9.2).
 
 **Adding a fact to the planner's memory.** Observe it in `memory.observe` from a store that
 already records it — never by writing a new one — fold it in `project_memory` with the count it

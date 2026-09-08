@@ -116,10 +116,11 @@ The parts you are most likely to touch:
 
 ```yaml
 agents:                          # who runs, in what order, as what
-  - {agent: antigravity, model: gemini-3.8-flash-high, role: researcher}
+  - {agent: claude,      model: sonnet,                role: researcher}
   - {agent: claude,      model: sonnet,                role: planner}
   - {agent: opencode,    model: opencode/big-pickle,   role: implementer}
   - {agent: claude,      model: sonnet,                role: verifier}
+                                 # either field may be a list - see Escalation ladders
 
 max_repair_attempts: 2           # how many repair passes a failure may buy
 
@@ -232,15 +233,26 @@ Two more capabilities worth knowing about:
 as one phase. Several verifiers form a quorum resolved by `verification.consensus`; a single
 dead ensemble member is a warning, not the end of the run.
 
-**Escalation ladders.** Give an agent a *list* of models instead of one. Rung 0 runs the
-first attempt, rung N runs repair attempt N — so a failure escalates to a stronger model
-rather than re-running the one that just failed.
+**Escalation ladders.** Give a role a *list* instead of one value. Rung 0 runs the first
+attempt, rung N runs escalation step N — so a failure escalates rather than re-running what
+just failed. `model` may be a list, **and so may `agent`**, which is what lets a role fall
+back across providers when the provider itself is what broke:
 
 ```yaml
-  - agent: opencode
+  - agent: opencode                                    # one agent, three models
     model: [opencode/big-pickle, anthropic/claude-sonnet-4-5, opencode/gpt-5.1-codex]
     role: implementer
+
+  - agent: [antigravity, claude]                       # across providers
+    model: [gemini-3.8-flash-high, sonnet]
+    role: researcher
 ```
+
+When both are lists they are paired rung by rung, so they must be the same length — a model
+id only means something next to the agent whose catalog defines it, and clamping the shorter
+list would quietly hand one to the wrong provider. Preflight probes every rung, not just the
+first: a fallback is only ever reached on a bad day, which is a bad day to find out its
+binary is missing.
 
 ---
 
