@@ -155,3 +155,12 @@ def describe_budget(budget_state: BudgetState) -> str:
     if budget_state.get("reason"):
         line += f" {budget_state['reason']}."
     return line
+
+
+def format_budget_status(
+    state: Any,
+    budget: Optional[Dict[str, Any]] = None,
+    now: Optional[float] = None,
+) -> str:
+    """Render a run's spend against its ceiling as one line, in one call."""
+    return describe_budget(evaluate_budget(state, budget, now))
