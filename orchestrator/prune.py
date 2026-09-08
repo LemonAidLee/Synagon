@@ -253,6 +253,59 @@ def plan_prune(
     return plan
 
 
+def prune_summary(plan: Dict[str, Any]) -> Dict[str, int]:
+    """Summarize why branches are being kept, grouped by reason category.
+
+    Takes the output of :func:`plan_prune` and returns counts of kept branches
+    grouped by their keep-reason category.  Dynamic details embedded in two of
+    the five reason strings (age, status) are collapsed into their parent
+    category so callers get a stable, readable summary.
+
+    Args:
+        plan: A plan dict as returned by :func:`plan_prune`.
+
+    Returns:
+        A dict with exactly these keys, each an ``int`` count::
+
+            {
+                "checked_out": 0,
+                "too_new": 0,
+                "dirty_worktree": 0,
+                "no_recorded_run": 0,
+                "run_failed": 0,
+                "other": 0,
+            }
+
+        Never raises — an unavailable plan or an empty ``kept`` list yields
+        all-zero counts.
+    """
+    result: Dict[str, int] = {
+        "checked_out": 0,
+        "too_new": 0,
+        "dirty_worktree": 0,
+        "no_recorded_run": 0,
+        "run_failed": 0,
+        "other": 0,
+    }
+
+    for candidate in plan.get("kept") or []:
+        reason = str(candidate.get("keep_reason") or "")
+        if reason == "checked out in the main repository":
+            result["checked_out"] += 1
+        elif reason.startswith("newer than the threshold"):
+            result["too_new"] += 1
+        elif reason == "its worktree still holds uncommitted changes":
+            result["dirty_worktree"] += 1
+        elif reason == "no recorded run, so success cannot be established":
+            result["no_recorded_run"] += 1
+        elif reason.startswith("run did not succeed"):
+            result["run_failed"] += 1
+        else:
+            result["other"] += 1
+
+    return result
+
+
 def execute_prune(
     project_root: str,
     plan: Dict[str, Any],
