@@ -230,12 +230,28 @@ def relative_to(root: str, absolute: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _holds_a_checkout(path: str) -> bool:
+    """Whether a directory under ``worktrees/`` is a worktree rather than its leftovers.
+
+    ``finish_worktree`` asks git to remove the checkout, and git sometimes takes the contents
+    while leaving the directory behind (a file still open in it is enough, on Windows). What
+    remains is an empty shell, and offering it as a root produces exactly the broken entry
+    this function exists to avoid: a tree that opens, lists nothing, and reads nothing.
+
+    A linked worktree always carries a ``.git`` *file* pointing at its admin directory, so
+    its presence is the question being asked here, and a directory git has already emptied
+    answers no.
+    """
+    return os.path.exists(os.path.join(path, ".git"))
+
+
 def roots(project_root: str, config: Any = None) -> List[Dict[str, Any]]:
     """The trees worth browsing, most useful first.
 
-    The project always comes first and always exists. A worktree appears only if it is on
-    disk, so a run whose worktree was cleaned up (`finish_worktree`) simply stops being
-    offered rather than becoming a broken entry.
+    The project always comes first and always exists. A worktree appears only if it still
+    holds a checkout, so a run whose worktree was cleaned up (`finish_worktree`) simply stops
+    being offered rather than becoming a broken entry - including when git empties the
+    directory but cannot remove it.
 
     Args:
         project_root: The project this daemon was opened on.
@@ -272,7 +288,7 @@ def roots(project_root: str, config: Any = None) -> List[Dict[str, Any]]:
         entries = []
     for entry in entries:
         try:
-            if not entry.is_dir():
+            if not entry.is_dir() or not _holds_a_checkout(entry.path):
                 continue
         except OSError:
             continue

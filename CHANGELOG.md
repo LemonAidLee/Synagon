@@ -85,6 +85,10 @@ symptom was the toast — for every file, of every type, in every root.
   throws on any path outside Latin-1.
 - **The root picker now switches trees.** It listed every root and browsed only the first,
   which hid the tree a person most wants after a run: the worktree the agent actually wrote in.
+- **A worktree root is offered only if it still holds a checkout.** `finish_worktree` asks
+  git to remove one and git sometimes takes the contents while leaving the directory behind
+  - which is what happened to every run in this checkout. The Explorer was listing ten roots
+  that each opened onto nothing. `roots()` documented this case and did not handle it.
 
 ### Fixed — the pipeline now survives a flaky agent
 

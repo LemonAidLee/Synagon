@@ -355,16 +355,32 @@ class TestRoots(_Tree):
         self.assertEqual(found[0]["id"], "project")
         self.assertEqual(found[0]["kind"], "project")
 
+    def _worktree(self, name="run-1"):
+        """A directory shaped like a linked worktree: a checkout with its `.git` file."""
+        path = os.path.join(self.root, ".orchestrator", "worktrees", name)
+        os.makedirs(path, exist_ok=True)
+        with open(os.path.join(path, ".git"), "w", encoding="utf-8") as handle:
+            handle.write("gitdir: ../../.git/worktrees/%s\n" % name)
+        return path
+
     def test_a_worktree_on_disk_becomes_a_root(self):
-        os.makedirs(os.path.join(self.root, ".orchestrator", "worktrees", "run-1"))
+        self._worktree()
         ids = [root["id"] for root in roots(self.root, None)]
         self.assertIn("worktree:run-1", ids)
 
     def test_a_worktree_that_was_cleaned_up_simply_stops_being_offered(self):
-        path = os.path.join(self.root, ".orchestrator", "worktrees", "run-1")
-        os.makedirs(path)
+        path = self._worktree()
         self.assertIn("worktree:run-1", [r["id"] for r in roots(self.root, None)])
         shutil.rmtree(path)
+        self.assertNotIn("worktree:run-1", [r["id"] for r in roots(self.root, None)])
+
+    def test_a_directory_git_emptied_but_could_not_remove_is_not_a_root(self):
+        """Retention records this outcome verbatim - "git refused to remove the worktree" -
+        and every run in this checkout's own store ended that way. The leftover is an empty
+        shell, and offering it is a root that opens, lists nothing, and reads nothing."""
+        path = self._worktree()
+        os.remove(os.path.join(path, ".git"))
+        self.assertTrue(os.path.isdir(path))
         self.assertNotIn("worktree:run-1", [r["id"] for r in roots(self.root, None)])
 
     def test_the_run_store_appears_only_when_it_exists(self):
