@@ -18,6 +18,7 @@ actually going to be served.
 
 import json
 import os
+import re
 import shutil
 import tempfile
 import unittest
@@ -586,6 +587,67 @@ class TestTheCockpitPage(unittest.TestCase):
                     if candidate in window:
                         posted.add(candidate)
         self.assertEqual(posted, {"/api/control/", "/api/team"})
+
+    def test_the_file_viewers_tokenizer_regex_actually_compiles(self):
+        """The file viewer was dead, and nothing anywhere said so.
+
+        `tokenize` built its pattern in a template literal with every backslash doubled
+        twice, so `(?=\\\\()` reached the regex engine as "a literal backslash, then an
+        unclosed group". `new RegExp` threw on the first line of every file, `openFile`
+        caught it, and the only symptom was a toast saying the file could not be read - for
+        every file, of every type, in every root. The server was fine the whole time.
+
+        Compiling the pattern with Python's engine is an approximation of V8's, but it is an
+        exact test of the failure that happened: an unbalanced group is unbalanced in both.
+        """
+        match = re.search(r"const tokenRegex = new RegExp\(`(.*?)`, '(\w+)'\);", self.text)
+        self.assertIsNotNone(match, "the tokenizer's regex is no longer where this test looks")
+        pattern = match.group(1)
+
+        # Resolve the three ${...} interpolations from the consts declared just above it,
+        # then undo one level of template-literal escaping, which is what V8 does before the
+        # RegExp constructor ever sees the string.
+        for name in ("keywords", "types", "builtins"):
+            value = re.search(rf'const {name} = "(.*?)";', self.text)
+            self.assertIsNotNone(value, f"the tokenizer's {name} list moved")
+            pattern = pattern.replace("${%s}" % name, value.group(1))
+        pattern = pattern.replace("\\\\", "\\")
+
+        try:
+            re.compile(pattern, re.M)
+        except re.error as exc:
+            self.fail(f"the file viewer's tokenizer regex does not compile: {exc}")
+
+    def test_the_page_never_double_escapes_a_regex(self):
+        r"""A quadruple backslash in a template literal is the fingerprint of that bug.
+
+        It is always wrong here: `\\\\b` in source means "a literal backslash, then a b",
+        which no pattern in this page wants, and it compiles silently often enough to reach
+        production.
+        """
+        self.assertNotIn("\\\\\\\\", self.text)
+
+    def test_the_explorer_encodes_what_it_puts_in_a_query_string(self):
+        """A path is user data. A file named `a b&c.py` is legal, and an unencoded one
+        truncates the request at the ampersand and reads the wrong file, or none."""
+        for call in re.findall(r"/api/(?:file|explorer)\?[^`']*", self.text):
+            if "${" not in call:
+                continue  # a fixed query string has nothing to encode
+            with self.subTest(call=call.strip()):
+                self.assertNotRegex(call, r"\$\{(?!encodeURIComponent)[A-Za-z_.]+\}")
+
+    def test_the_file_viewer_says_when_a_file_is_binary_or_cut(self):
+        """`explorer.read_file` reports both rather than decoding noise or lying about
+        length, and a viewer that drops those facts draws an empty pane instead."""
+        self.assertIn("data.binary", self.text)
+        self.assertIn("data.truncated", self.text)
+
+    def test_the_root_picker_switches_the_tree(self):
+        """It listed every tree and browsed only the first, which hides the one a person
+        wants most after a run: the worktree the agent actually wrote in."""
+        self.assertRegex(
+            self.text, r"DOM\.rootPicker\.addEventListener\('change'"
+        )
 
     def test_motion_is_disabled_for_anyone_who_asked_for_less_of_it(self):
         self.assertIn("prefers-reduced-motion", self.text)

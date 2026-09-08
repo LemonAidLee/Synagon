@@ -1697,7 +1697,7 @@ body.terminals-hidden .terminals-area, body.terminals-hidden #splitter-terminals
         const types = "Dict|Any|Optional|List|Tuple|Union|Callable|Set|Mapping|Sequence|str|int|bool|float|bytes";
         const builtins = "print|dict|list|set|len|sum|os|sys|__init__|__enter__|__exit__|self|super|Math|console|document|window";
         
-        const tokenRegex = new RegExp(`(#.*?$|\\\\/\\\\/.*?$|".*?"|'.*?'|\\\\b(?:${keywords})\\\\b|\\\\b(?:${types})\\\\b|\\\\b(?:${builtins})\\\\b|\\\\b[A-Za-z_][A-Za-z0-9_]*(?=\\\\()|\\\\b\\\\d+\\\\b)`, 'gm');
+        const tokenRegex = new RegExp(`(#.*?$|\\/\\/.*?$|".*?"|'.*?'|\\b(?:${keywords})\\b|\\b(?:${types})\\b|\\b(?:${builtins})\\b|\\b[A-Za-z_][A-Za-z0-9_]*(?=\\()|\\b\\d+\\b)`, 'gm');
         
         code = code.replace(tokenRegex, (match) => {
             if (match.startsWith('#') || match.startsWith('//')) {
@@ -1706,7 +1706,7 @@ body.terminals-hidden .terminals-area, body.terminals-hidden #splitter-terminals
             if (match.startsWith('"') || match.startsWith("'")) {
                 return `<span class="token-string">${match}</span>`;
             }
-            if (/^\\d+$/.test(match)) {
+            if (/^\d+$/.test(match)) {
                 return `<span class="token-number">${match}</span>`;
             }
             if (new RegExp(`^(${keywords})$`).test(match)) {
@@ -1726,14 +1726,27 @@ body.terminals-hidden .terminals-area, body.terminals-hidden #splitter-terminals
 
     // 10. EXPLORER (MOCK / API)
     // Basic root fetching
-    async function loadExplorerRoots() {
+    async function loadExplorerRoots(rootId) {
+        const wanted = rootId || 'project';
         try {
-            const data = await apiGet('/api/explorer?root=project&path=&hidden=0');
-            DOM.rootPicker.innerHTML = data.roots.map(r => `<option value="${r.id}">${r.label}</option>`).join('');
-            renderExplorerTree(data.entries, DOM.explorerTree, data.root, "");
+            const data = await apiGet(
+                `/api/explorer?root=${encodeURIComponent(wanted)}&path=&hidden=0`);
+            // Repopulated on every load because the roots change while the daemon runs: a
+            // run creates a worktree and finishing it removes one (ARCHITECTURE §26.1).
+            DOM.rootPicker.innerHTML = (data.roots || [])
+                .map(r => `<option value="${r.id}">${r.label}</option>`).join('');
+            DOM.rootPicker.value = data.root || wanted;
+            renderExplorerTree(data.entries || [], DOM.explorerTree, data.root, "");
         } catch (e) {
             DOM.explorerTree.innerHTML = '<div class="empty-state">NO SIGNAL</div>';
         }
+    }
+
+    // The picker listed every tree and browsed only the first one. A run's edits land in its
+    // worktree, which is the tree a person most wants after a run finishes, so a picker that
+    // does not switch is a picker that hides the answer.
+    if (DOM.rootPicker) {
+        DOM.rootPicker.addEventListener('change', () => loadExplorerRoots(DOM.rootPicker.value));
     }
 
     function renderExplorerTree(entries, container, root, basePath) {
@@ -1755,7 +1768,9 @@ body.terminals-hidden .terminals-area, body.terminals-hidden #splitter-terminals
                     if (childrenContainer.classList.contains('hidden')) {
                         childrenContainer.classList.remove('hidden');
                         if (childrenContainer.innerHTML === '') {
-                            const data = await apiGet(`/api/explorer?root=${root}&path=${e.path}&hidden=0`);
+                            const data = await apiGet(
+                                `/api/explorer?root=${encodeURIComponent(root)}` +
+                                `&path=${encodeURIComponent(e.path)}&hidden=0`);
                             renderExplorerTree(data.entries, childrenContainer, root, e.path);
                         }
                     } else {
@@ -1774,8 +1789,12 @@ body.terminals-hidden .terminals-area, body.terminals-hidden #splitter-terminals
 
     async function openFile(root, path) {
         try {
-            const data = await apiGet(`/api/file?root=${root}&path=${path}`);
-            const tabId = 'file-' + btoa(path).replace(/[^a-z0-9]/gi, '');
+            const data = await apiGet(
+                `/api/file?root=${encodeURIComponent(root)}&path=${encodeURIComponent(path)}`);
+            // btoa throws on anything outside Latin-1, and a repository is allowed to hold a
+            // file whose name is not. The id only has to be stable and unique per path.
+            const tabId = 'file-' + Array.from(path)
+                .map(c => c.codePointAt(0).toString(36)).join('');
             
             if (!document.querySelector(`[data-tab-id="${tabId}"]`)) {
                 // Create tab
@@ -1790,13 +1809,23 @@ body.terminals-hidden .terminals-area, body.terminals-hidden #splitter-terminals
                 content.className = 'tab-content file-viewer';
                 content.id = `pane-${tabId}`;
                 
-                const lines = data.text.split('\n');
                 let html = `<div class="file-breadcrumbs">
                     <span>${data.path}</span>
-                    <span>INFO: ${data.language} | ${data.size} bytes | ${data.lines} lines</span>
+                    <span>INFO: ${data.language || 'text'} | ${data.size} bytes | ${data.lines} lines</span>
                 </div>`;
-                
-                html += lines.map((l, i) => `<div class="code-line"><span class="line-num">${i+1}</span><span class="code-text">${tokenize(l, data.language)}</span></div>`).join('');
+
+                // `explorer.read_file` names a binary file rather than decoding it into
+                // noise, and it caps a long one. Both are facts about what is on screen, so
+                // the viewer says them instead of drawing an empty pane.
+                if (data.binary) {
+                    html += `<div class="empty-state">BINARY FILE - ${data.size} bytes, not shown</div>`;
+                } else {
+                    const lines = (data.text || '').split('\n');
+                    html += lines.map((l, i) => `<div class="code-line"><span class="line-num">${i+1}</span><span class="code-text">${tokenize(l, data.language)}</span></div>`).join('');
+                    if (data.truncated) {
+                        html += `<div class="empty-state">TRUNCATED - showing the first ${data.lines} lines of ${data.size} bytes</div>`;
+                    }
+                }
                 content.innerHTML = html;
                 
                 document.querySelector('.editor-area').appendChild(content);
@@ -1812,7 +1841,10 @@ body.terminals-hidden .terminals-area, body.terminals-hidden #splitter-terminals
             switchTab(tabId);
             DOM.statusFile.innerText = path;
         } catch (e) {
-            showToast("Failed to read file", "error");
+            // Naming the file is the difference between "the viewer is broken" and "that
+            // one path is gone", which are very different things to go and look at.
+            showToast(`Could not open ${path}: ${e.message}`, "error");
+            console.error('openFile', root, path, e);
         }
     }
 

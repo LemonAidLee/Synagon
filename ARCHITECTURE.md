@@ -1971,3 +1971,24 @@ refuses a foreign `Origin`, refuses a traversal over the wire, and is not reacha
 The page tests read the real `cockpit.html`: that it loads nothing from the network, that the
 only routes it POSTs to are the control verbs and the team editor, and that it honours
 `prefers-reduced-motion` — claims about behaviour, not about taste.
+
+One of those page tests goes further, and it is worth explaining why. The file viewer was
+*dead* — every file, every type, every root — because `tokenize()` built its pattern in a
+template literal with each backslash doubled twice, so `(?=\\\\()` reached the regex engine as
+a literal backslash followed by an unclosed group. `new RegExp` threw on the first line of
+every file, `openFile` caught it, and the whole symptom was a toast saying the file could not
+be read. Every string-level assertion that could be made about that page passed. So the test
+extracts the pattern, resolves its `${…}` interpolations, undoes one level of template-literal
+escaping, and **compiles it**. Python's engine is not V8's, but an unbalanced group is
+unbalanced in both, which is exactly the failure that happened. A sibling test refuses a
+quadruple backslash anywhere in the page, because that sequence is the fingerprint of this
+mistake and is never what any pattern here wants.
+
+`test_archive.py` and `test_agent_ladder.py` follow the same rule of testing the property
+rather than the path. The archive's central claim is reversibility, so the test that matters
+reads every file of a run into memory, archives it, restores it, and asserts the bytes are
+identical; the next one asserts that a restore onto a live run of the same id is refused rather
+than performed. The ladder's central claim is that a run survives a dead *provider*, so its
+pipeline test scripts the first provider to return empty output on every attempt and asserts
+both that the second one rescues the phase and that the phase still emits exactly one
+`AgentResult` — the same invariant §9.0 protects, now across a provider boundary.

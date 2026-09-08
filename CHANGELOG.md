@@ -64,6 +64,28 @@ thing that failed was the provider. ARCHITECTURE.md §9.0 recorded the gap; this
   provider returns nothing on every attempt and the phase is rescued by the second, still
   producing exactly one `AgentResult`.
 
+### Fixed — the cockpit's file viewer could not open any file
+
+Clicking any file in the Explorer showed "Failed to read file". The server was fine throughout:
+`/api/file` returned 200 with correct content for every path tried. The fault was one line of
+the page. `tokenize()` built its pattern in a template literal with every backslash doubled
+twice, so `(?=\\\\()` reached the regex engine as "a literal backslash, then an unclosed
+group". `new RegExp` threw on the first line of every file, `openFile` caught it, and the only
+symptom was the toast — for every file, of every type, in every root.
+
+- The pattern is correctly escaped, and `/^\\d+$/` (which matched a literal backslash, so no
+  number was ever highlighted) is now `/^\d+$/`.
+- `tests/test_tier9.py` extracts that pattern from the served page, resolves its
+  interpolations, and **compiles it**. An unbalanced group is unbalanced in any engine, and a
+  page-level string assertion would not have caught this.
+- Paths and root ids are `encodeURIComponent`-encoded — a file named `a b&c.py` is legal, and
+  an unencoded one truncated the request at the ampersand.
+- The viewer reports a binary or truncated file instead of drawing an empty pane, the failure
+  toast names the file and the reason, and the tab id no longer goes through `btoa`, which
+  throws on any path outside Latin-1.
+- **The root picker now switches trees.** It listed every root and browsed only the first,
+  which hid the tree a person most wants after a run: the worktree the agent actually wrote in.
+
 ### Fixed — the pipeline now survives a flaky agent
 
 This is the change that matters most in this release, and it came from reading the project's
