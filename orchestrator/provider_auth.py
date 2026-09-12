@@ -233,3 +233,91 @@ def check_claude_auth(timeout: int = DEFAULT_TIMEOUT) -> ProviderAuthStatus:
 def check_antigravity_auth(timeout: int = DEFAULT_TIMEOUT) -> ProviderAuthStatus:
     """Antigravity CLI (agy): installed + runnable, but authentication cannot be confirmed via CLI."""
     return _check_version_only("antigravity", timeout)
+
+
+#: Substrings (checked case-insensitively against the whole trimmed output) that OpenCode's own
+#: `auth list` is expected to use for "nothing is configured" - kept short and literal on
+#: purpose (see the design spec's "Risks" section: fail closed on anything unrecognised rather
+#: than widen this list speculatively).
+_NO_PROVIDERS_MARKERS = ("no providers", "no authenticated providers", "not logged in", "no credentials")
+
+#: Line prefixes that mark a header/separator row rather than a provider entry.
+_SKIP_LINE_PREFIXES = ("provider", "-", "=")
+
+
+def _parse_opencode_auth_list(text: str) -> Optional[List[str]]:
+    """Provider names out of `opencode auth list` output, or `None` if unparseable.
+
+    Conservative on purpose: a recognisable "nothing configured" message is zero providers;
+    each remaining non-header, non-blank line's first token is taken as a provider id; and if
+    that leaves nothing at all (e.g. a header row with no data rows) this returns `None` so the
+    caller reports a CLI error instead of silently claiming "not authenticated".
+    """
+    stripped = text.strip()
+    if not stripped:
+        return []
+    lowered = stripped.lower()
+    if any(marker in lowered for marker in _NO_PROVIDERS_MARKERS):
+        return []
+
+    providers: List[str] = []
+    for line in stripped.splitlines():
+        line = line.strip()
+        if not line or line.lower().startswith(_SKIP_LINE_PREFIXES):
+            continue
+        token = line.split()[0].rstrip(":")
+        if token:
+            providers.append(token)
+    return providers or None
+
+
+def check_opencode_auth(timeout: int = DEFAULT_TIMEOUT) -> ProviderAuthStatus:
+    """OpenCode: `opencode auth list` is documented to list providers with stored credentials.
+
+    This is the one provider of the three with an officially documented, non-interactive,
+    secret-free status command (opencode.ai/docs/cli/) - see the design spec's research table.
+    """
+    started = time.time()
+    try:
+        executable = get_opencode_executable_path()
+    except Exception as exc:
+        return _status("opencode", False, None, AUTH_NOT_INSTALLED, str(exc), started)
+
+    try:
+        completed = _run(executable, ["auth", "list"], timeout)
+    except _ProbeTimeout:
+        return _status(
+            "opencode", True, executable, AUTH_TIMED_OUT,
+            f"'opencode auth list' did not respond within {timeout}s.", started,
+        )
+    except _ProbeFailed as exc:
+        return _status(
+            "opencode", True, executable, AUTH_CLI_ERROR,
+            f"Could not run 'opencode auth list': {exc}", started,
+        )
+
+    text = _decode(completed.stdout) + _decode(completed.stderr)
+    if completed.returncode != 0:
+        return _status(
+            "opencode", True, executable, AUTH_CLI_ERROR,
+            f"'opencode auth list' exited with code {completed.returncode}: {text.strip()[:300]}",
+            started,
+        )
+
+    providers = _parse_opencode_auth_list(text)
+    if providers is None:
+        return _status(
+            "opencode", True, executable, AUTH_CLI_ERROR,
+            "Could not parse 'opencode auth list' output; run it yourself to check.", started,
+        )
+    if not providers:
+        return _status(
+            "opencode", True, executable, AUTH_NOT_AUTHENTICATED,
+            "No providers are configured in OpenCode's credentials file.", started,
+        )
+    return _status(
+        "opencode", True, executable, AUTH_AUTHENTICATED,
+        f"Providers with stored credentials: {', '.join(providers)}", started,
+        subscription_state=SUBSCRIPTION_UNAVAILABLE,
+        subscription_detail=SUBSCRIPTION_CONFIRMED_DETAIL,
+    )

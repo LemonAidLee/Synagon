@@ -25,6 +25,21 @@ from orchestrator.provider_auth import (
     redact,
 )
 
+from orchestrator.provider_auth import (  # noqa: F811 - extends the Task 1 import block
+    AUTH_AUTHENTICATED,
+    AUTH_CLI_ERROR,
+    AUTH_NOT_AUTHENTICATED,
+    AUTH_NOT_INSTALLED,
+    AUTH_TIMED_OUT,
+    AUTH_UNVERIFIABLE,
+    SUBSCRIPTION_CONFIRMED_DETAIL,
+    _parse_opencode_auth_list,
+    check_antigravity_auth,
+    check_claude_auth,
+    check_opencode_auth,
+    redact,
+)
+
 
 class TestAuthStatesAreDistinct(unittest.TestCase):
     def test_every_state_is_its_own_string(self):
@@ -144,6 +159,121 @@ class TestAntigravityVersionOnlyProbe(unittest.TestCase):
             status = check_antigravity_auth()
         self.assertEqual(status["auth_state"], AUTH_UNVERIFIABLE)
         self.assertEqual(status["provider"], "antigravity")
+
+
+class TestParseOpencodeAuthList(unittest.TestCase):
+    def test_multiple_providers(self):
+        self.assertEqual(
+            _parse_opencode_auth_list("anthropic\nopencode\n"), ["anthropic", "opencode"]
+        )
+
+    def test_single_provider_with_extra_columns(self):
+        self.assertEqual(_parse_opencode_auth_list("anthropic   oauth\n"), ["anthropic"])
+
+    def test_empty_output_is_zero_providers_not_unparseable(self):
+        self.assertEqual(_parse_opencode_auth_list(""), [])
+
+    def test_explicit_no_providers_message_is_zero_providers(self):
+        self.assertEqual(_parse_opencode_auth_list("No providers configured.\n"), [])
+
+    def test_header_only_output_is_unparseable(self):
+        self.assertIsNone(_parse_opencode_auth_list("PROVIDER   METHOD\n"))
+
+
+class TestOpencodeAuthCheck(unittest.TestCase):
+    def test_not_installed(self):
+        with patch(
+            "orchestrator.provider_auth.get_opencode_executable_path",
+            side_effect=FileNotFoundError("no opencode"),
+        ):
+            status = check_opencode_auth()
+        self.assertEqual(status["auth_state"], AUTH_NOT_INSTALLED)
+
+    def test_authenticated_reports_provider_names_and_the_required_subscription_copy(self):
+        with patch(
+            "orchestrator.provider_auth.get_opencode_executable_path",
+            return_value="C:/bin/opencode.exe",
+        ), patch(
+            "orchestrator.provider_auth.subprocess.run",
+            return_value=_Completed(returncode=0, stdout=b"anthropic\nopencode\n", stderr=b""),
+        ):
+            status = check_opencode_auth()
+        self.assertEqual(status["auth_state"], AUTH_AUTHENTICATED)
+        self.assertIn("anthropic", status["detail"])
+        self.assertIn("opencode", status["detail"])
+        self.assertEqual(status["subscription_detail"], SUBSCRIPTION_CONFIRMED_DETAIL)
+
+    def test_not_authenticated_when_no_providers_configured(self):
+        with patch(
+            "orchestrator.provider_auth.get_opencode_executable_path",
+            return_value="C:/bin/opencode.exe",
+        ), patch(
+            "orchestrator.provider_auth.subprocess.run",
+            return_value=_Completed(returncode=0, stdout=b"", stderr=b""),
+        ):
+            status = check_opencode_auth()
+        self.assertEqual(status["auth_state"], AUTH_NOT_AUTHENTICATED)
+
+    def test_nonzero_exit_is_a_cli_error(self):
+        with patch(
+            "orchestrator.provider_auth.get_opencode_executable_path",
+            return_value="C:/bin/opencode.exe",
+        ), patch(
+            "orchestrator.provider_auth.subprocess.run",
+            return_value=_Completed(returncode=1, stdout=b"", stderr=b"boom"),
+        ):
+            status = check_opencode_auth()
+        self.assertEqual(status["auth_state"], AUTH_CLI_ERROR)
+
+    def test_unparseable_output_is_a_cli_error_not_a_guess(self):
+        with patch(
+            "orchestrator.provider_auth.get_opencode_executable_path",
+            return_value="C:/bin/opencode.exe",
+        ), patch(
+            "orchestrator.provider_auth.subprocess.run",
+            return_value=_Completed(returncode=0, stdout=b"PROVIDER   METHOD\n", stderr=b""),
+        ):
+            status = check_opencode_auth()
+        self.assertEqual(status["auth_state"], AUTH_CLI_ERROR)
+
+    def test_timeout(self):
+        with patch(
+            "orchestrator.provider_auth.get_opencode_executable_path",
+            return_value="C:/bin/opencode.exe",
+        ), patch(
+            "orchestrator.provider_auth.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(cmd="opencode", timeout=15),
+        ):
+            status = check_opencode_auth()
+        self.assertEqual(status["auth_state"], AUTH_TIMED_OUT)
+
+    def test_probe_command_and_safe_flags(self):
+        with patch(
+            "orchestrator.provider_auth.get_opencode_executable_path",
+            return_value="C:/bin/opencode.exe",
+        ), patch(
+            "orchestrator.provider_auth.subprocess.run",
+            return_value=_Completed(returncode=0, stdout=b"anthropic\n", stderr=b""),
+        ) as mock_run:
+            check_opencode_auth(timeout=9)
+        args, kwargs = mock_run.call_args
+        self.assertEqual(args[0], ["C:/bin/opencode.exe", "auth", "list"])
+        self.assertFalse(kwargs["shell"])
+        self.assertIsNotNone(kwargs["stdin"])
+        self.assertEqual(kwargs["timeout"], 9)
+
+    def test_no_secret_shaped_output_survives_into_detail(self):
+        with patch(
+            "orchestrator.provider_auth.get_opencode_executable_path",
+            return_value="C:/bin/opencode.exe",
+        ), patch(
+            "orchestrator.provider_auth.subprocess.run",
+            return_value=_Completed(
+                returncode=1, stdout=b"", stderr=b"token=sk-ant-api03-verysecretvalue123"
+            ),
+        ):
+            status = check_opencode_auth()
+        self.assertNotIn("sk-ant-api03", status["detail"])
 
 
 if __name__ == "__main__":
