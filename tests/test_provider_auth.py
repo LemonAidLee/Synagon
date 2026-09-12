@@ -276,5 +276,118 @@ class TestOpencodeAuthCheck(unittest.TestCase):
         self.assertNotIn("sk-ant-api03", status["detail"])
 
 
+from orchestrator.provider_auth import (  # noqa: F811 - extends the running import block
+    PROVIDERS,
+    check_all_providers,
+    format_provider_report,
+    open_provider_login,
+    providers_ok,
+)
+
+
+class TestCheckAllProviders(unittest.TestCase):
+    def test_returns_all_three_in_a_fixed_order(self):
+        with patch(
+            "orchestrator.provider_auth.get_claude_executable_path",
+            side_effect=FileNotFoundError("x"),
+        ), patch(
+            "orchestrator.provider_auth.get_opencode_executable_path",
+            side_effect=FileNotFoundError("x"),
+        ), patch(
+            "orchestrator.provider_auth.get_antigravity_executable_path",
+            side_effect=FileNotFoundError("x"),
+        ):
+            report = check_all_providers()
+        self.assertEqual([p["provider"] for p in report], list(PROVIDERS))
+        self.assertTrue(all(p["auth_state"] == AUTH_NOT_INSTALLED for p in report))
+
+
+class TestProvidersOk(unittest.TestCase):
+    def test_ok_when_nothing_is_a_cli_error_or_timeout(self):
+        report = [
+            {"provider": "claude", "auth_state": AUTH_UNVERIFIABLE},
+            {"provider": "opencode", "auth_state": AUTH_NOT_AUTHENTICATED},
+            {"provider": "antigravity", "auth_state": AUTH_NOT_INSTALLED},
+        ]
+        self.assertTrue(providers_ok(report))
+
+    def test_not_ok_when_something_errored(self):
+        report = [{"provider": "claude", "auth_state": AUTH_CLI_ERROR}]
+        self.assertFalse(providers_ok(report))
+
+
+class TestFormatProviderReport(unittest.TestCase):
+    def test_names_every_provider_and_its_detail(self):
+        report = [
+            {
+                "provider": "claude", "installed": True, "auth_state": AUTH_UNVERIFIABLE,
+                "detail": "no documented check", "subscription_detail": "",
+            },
+            {
+                "provider": "opencode", "installed": True, "auth_state": AUTH_AUTHENTICATED,
+                "detail": "providers: anthropic", "subscription_detail": SUBSCRIPTION_CONFIRMED_DETAIL,
+            },
+            {
+                "provider": "antigravity", "installed": False, "auth_state": AUTH_NOT_INSTALLED,
+                "detail": "not found", "subscription_detail": "",
+            },
+        ]
+        text = format_provider_report(report, color=False)
+        self.assertIn("claude", text)
+        self.assertIn("opencode", text)
+        self.assertIn("antigravity", text)
+        self.assertIn(SUBSCRIPTION_CONFIRMED_DETAIL, text)
+
+
+class TestOpenProviderLogin(unittest.TestCase):
+    def test_unknown_provider_is_refused_without_spawning_anything(self):
+        with patch("orchestrator.provider_auth._spawn_detached_terminal") as spawn:
+            result = open_provider_login("not-a-real-provider")
+        self.assertFalse(result["ok"])
+        spawn.assert_not_called()
+
+    def test_not_installed_is_refused_without_spawning_anything(self):
+        with patch(
+            "orchestrator.provider_auth.get_claude_executable_path",
+            side_effect=FileNotFoundError("no claude"),
+        ), patch("orchestrator.provider_auth._spawn_detached_terminal") as spawn:
+            result = open_provider_login("claude")
+        self.assertFalse(result["ok"])
+        spawn.assert_not_called()
+
+    def test_claude_login_spawns_the_bare_binary(self):
+        with patch(
+            "orchestrator.provider_auth.get_claude_executable_path",
+            return_value="C:/bin/claude.exe",
+        ), patch("orchestrator.provider_auth._spawn_detached_terminal") as spawn:
+            result = open_provider_login("claude")
+        self.assertTrue(result["ok"])
+        spawn.assert_called_once()
+        cmd = spawn.call_args.args[0]
+        self.assertEqual(cmd, ["C:/bin/claude.exe"])
+
+    def test_opencode_login_spawns_auth_login(self):
+        with patch(
+            "orchestrator.provider_auth.get_opencode_executable_path",
+            return_value="C:/bin/opencode.exe",
+        ), patch("orchestrator.provider_auth._spawn_detached_terminal") as spawn:
+            result = open_provider_login("opencode")
+        self.assertTrue(result["ok"])
+        cmd = spawn.call_args.args[0]
+        self.assertEqual(cmd, ["C:/bin/opencode.exe", "auth", "login"])
+
+    def test_spawn_failure_is_reported_not_raised(self):
+        with patch(
+            "orchestrator.provider_auth.get_claude_executable_path",
+            return_value="C:/bin/claude.exe",
+        ), patch(
+            "orchestrator.provider_auth._spawn_detached_terminal",
+            side_effect=OSError("no terminal available"),
+        ):
+            result = open_provider_login("claude")
+        self.assertFalse(result["ok"])
+        self.assertIn("no terminal available", result["error"])
+
+
 if __name__ == "__main__":
     unittest.main()

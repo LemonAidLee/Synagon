@@ -321,3 +321,106 @@ def check_opencode_auth(timeout: int = DEFAULT_TIMEOUT) -> ProviderAuthStatus:
         subscription_state=SUBSCRIPTION_UNAVAILABLE,
         subscription_detail=SUBSCRIPTION_CONFIRMED_DETAIL,
     )
+
+
+_CHECKERS = {
+    "claude": check_claude_auth,
+    "opencode": check_opencode_auth,
+    "antigravity": check_antigravity_auth,
+}
+
+
+def check_all_providers(timeout: int = DEFAULT_TIMEOUT) -> List[ProviderAuthStatus]:
+    """Every provider's status, in `PROVIDERS` order. One probe per provider, run in turn."""
+    return [_CHECKERS[provider](timeout) for provider in PROVIDERS]
+
+
+def providers_ok(providers: List[ProviderAuthStatus]) -> bool:
+    """False only when a probe itself broke (`cli_error`/`timed_out`) - never on account state.
+
+    "Not installed" and "not authenticated" are informative facts about the world, not failures
+    of this check; a `--check-providers` run that reports them clearly has done its job.
+    """
+    return not any(p.get("auth_state") in (AUTH_CLI_ERROR, AUTH_TIMED_OUT) for p in providers)
+
+
+def format_provider_report(providers: List[ProviderAuthStatus], color: bool = True) -> str:
+    """Render a provider status list as human-readable text, styled like `--doctor`'s output."""
+    if color:
+        from colorama import Fore, Style
+
+        green, red, yellow, cyan, reset, bright = (
+            Fore.GREEN, Fore.RED, Fore.YELLOW, Fore.CYAN, Style.RESET_ALL, Style.BRIGHT,
+        )
+    else:
+        green = red = yellow = cyan = reset = bright = ""
+
+    markers = {
+        AUTH_AUTHENTICATED: green + "[OK]" + reset,
+        AUTH_UNVERIFIABLE: yellow + "[?]" + reset,
+        AUTH_NOT_AUTHENTICATED: yellow + "[NOT SIGNED IN]" + reset,
+        AUTH_EXPIRED: yellow + "[EXPIRED]" + reset,
+        AUTH_NOT_INSTALLED: red + "[NOT INSTALLED]" + reset,
+        AUTH_PROVIDER_UNAVAILABLE: red + "[UNAVAILABLE]" + reset,
+        AUTH_CLI_ERROR: red + "[ERROR]" + reset,
+        AUTH_TIMED_OUT: red + "[TIMED OUT]" + reset,
+    }
+
+    lines = [f"{cyan}{bright}PROVIDER ACCOUNTS{reset}", ""]
+    for provider in providers:
+        marker = markers.get(provider.get("auth_state"), "[?]")
+        lines.append(f"  {marker} {bright}{provider.get('provider')}{reset}")
+        lines.append(f"      {provider.get('detail', '')}")
+        if provider.get("subscription_detail"):
+            lines.append(f"      {provider['subscription_detail']}")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def _spawn_detached_terminal(cmd: List[str], cwd: str, title: str) -> None:
+    """Open `cmd` in its own terminal window and return immediately.
+
+    Deliberately not `orchestrator.launcher.run_agent_cli`: that helper waits for the launched
+    process to exit and force-kills the whole tree past its timeout, which is right for an
+    agent turn but wrong for an interactive login a person may leave open indefinitely (bare
+    `claude` opens an indefinite REPL). This starts the window, is not owned by the
+    orchestrator's process-job machinery, and is never waited on or killed.
+    """
+    if sys.platform == "win32":
+        import shutil as _shutil
+
+        wt_path = _shutil.which("wt.exe")
+        if not wt_path:
+            candidate = os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\WindowsApps\wt.exe")
+            if os.path.isfile(candidate):
+                wt_path = candidate
+        if wt_path:
+            subprocess.Popen([wt_path, "--title", title, "-d", cwd] + cmd)
+            return
+        create_new_console = 0x00000010
+        subprocess.Popen(cmd, cwd=cwd, creationflags=create_new_console)
+        return
+    subprocess.Popen(cmd, cwd=cwd)
+
+
+def open_provider_login(provider: str) -> Dict[str, Any]:
+    """Open one provider's own login flow in a detached terminal window.
+
+    Returns immediately; it does not wait for the human to finish signing in, and never touches
+    whatever credential that flow ends up storing.
+    """
+    if provider not in PROVIDERS:
+        return {"ok": False, "error": f"unknown provider '{provider}'"}
+
+    try:
+        executable = _resolve_executable(provider)
+    except Exception as exc:
+        return {"ok": False, "error": f"'{provider}' is not installed: {redact(str(exc))}"}
+
+    cmd = [executable] + _LOGIN_ARGS[provider]
+    title = f"{provider.capitalize()} Login"
+    try:
+        _spawn_detached_terminal(cmd, cwd=os.getcwd(), title=title)
+    except Exception as exc:
+        return {"ok": False, "error": redact(str(exc))}
+    return {"ok": True, "provider": provider}
