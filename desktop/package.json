@@ -1,9 +1,9 @@
 {
   "name": "orchestrator-desktop",
-  "productName": "Orchestrator",
+  "productName": "Synagon",
   "version": "0.1.0",
   "private": true,
-  "description": "The desktop shell around the orchestrator daemon: open a project, drive its team.",
+  "description": "The Synagon desktop shell around the orchestrator daemon: open a project, drive its team.",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -15,7 +15,7 @@
     "electron-builder": "^25.0.0"
   },
   "build": {
-    "appId": "dev.orchestrator.desktop",
+    "appId": "dev.synagon.desktop",
     "files": ["main.js", "preload.js", "package.json"],
     "extraResources": [],
     "win": { "target": "nsis" },

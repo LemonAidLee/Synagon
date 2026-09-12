@@ -185,7 +185,10 @@ def _safe_summarize_langgraph_config(config_path: Path) -> Dict[str, Any]:
         return {}
 
 
-def collect_project_context(project_root: Optional[str] = None) -> str:
+def collect_project_context(
+    project_root: Optional[str] = None,
+    working_directory: Optional[str] = None,
+) -> str:
     """Inspect the project root and produce a concise, safe markdown context block.
 
     Security guarantees:
@@ -195,6 +198,11 @@ def collect_project_context(project_root: Optional[str] = None) -> str:
 
     Args:
         project_root: The project directory path (defaults to current working directory).
+        working_directory: Where agents actually execute, when that is not the project root
+            (an isolated run's worktree). The block then names *that* directory as the one to
+            work in: agents act on absolute paths they are shown, and a run that showed them the
+            user's checkout sent OpenCode straight out of its worktree (measured - it stopped on
+            its own external-directory permission prompt), which invariant 3 exists to prevent.
 
     Returns:
         A concise, deterministic markdown string summarizing project structure.
@@ -223,9 +231,19 @@ def collect_project_context(project_root: Optional[str] = None) -> str:
             else:
                 top_level_files.append(entry)
 
+    if working_directory and os.path.normcase(os.path.abspath(working_directory)) != os.path.normcase(root_str):
+        root_lines = [
+            f"- **Project Root (your working directory)**: `{os.path.abspath(working_directory)}`",
+            "- **Isolation**: this is an isolated git worktree of the project. Read and write files "
+            "only here, using paths relative to this directory; the user's own checkout is not "
+            "part of this task and must not be read or modified.",
+        ]
+    else:
+        root_lines = [f"- **Project Root**: `{root_str}`"]
+
     lines: List[str] = [
         "### Project Context (Collected by Orchestrator)",
-        f"- **Project Root**: `{root_str}`",
+        *root_lines,
         f"- **Top-Level Directories**: {', '.join(top_level_dirs) if top_level_dirs else 'None'}",
         f"- **Top-Level Files**: {', '.join(top_level_files) if top_level_files else 'None'}",
     ]

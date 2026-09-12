@@ -1,14 +1,48 @@
 const http = require('http');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const vscode = require('vscode');
 
 let server = null;
-const PORT = 49182;
-const PORT_FILE = 'C:/Users/Asus/.antigravity-ide/terminal_bridge.json';
+// True only while THIS extension host holds the port. Every IDE window activates the bridge,
+// and only one of them can listen.
+let listening = false;
+let retryTimer = null;
+let disposed = false;
+const PORT = parseInt(process.env.ANTIGRAVITY_TERMINAL_BRIDGE_PORT || '', 10) || 49182;
+const PORT_FILE = process.env.ANTIGRAVITY_TERMINAL_BRIDGE_PORT_FILE
+    || path.join(os.homedir(), '.antigravity-ide', 'terminal_bridge.json');
+// How long a window that lost the race for the port waits before trying again. Measured: the
+// window that held the port closed, and the one left open had given up on its only attempt
+// (EADDRINUSE), so no window served the bridge until the IDE was restarted.
+const RETRY_MS = parseInt(process.env.ANTIGRAVITY_TERMINAL_BRIDGE_RETRY_MS || '', 10) || 5000;
+
+function stop() {
+    disposed = true;
+    if (retryTimer) {
+        clearTimeout(retryTimer);
+        retryTimer = null;
+    }
+    if (server) {
+        try { server.close(); } catch (e) {}
+        server = null;
+    }
+    // The port file describes whoever is listening. A window that never got the port must not
+    // delete the file the listening window wrote.
+    if (listening) {
+        listening = false;
+        try {
+            if (fs.existsSync(PORT_FILE)) {
+                fs.unlinkSync(PORT_FILE);
+            }
+        } catch (e) {}
+    }
+}
 
 function activate(context) {
     console.log('[TerminalBridge] Activating Antigravity Terminal Bridge...');
+    disposed = false;
 
     // Close any existing server
     if (server) {
@@ -138,9 +172,11 @@ function activate(context) {
         res.end(JSON.stringify({ error: 'Endpoint not found' }));
     });
 
-    server.listen(PORT, '127.0.0.1', () => {
+    server.on('listening', () => {
+        listening = true;
         console.log(`[TerminalBridge] Listening on http://127.0.0.1:${PORT}`);
         try {
+            fs.mkdirSync(path.dirname(PORT_FILE), { recursive: true });
             fs.writeFileSync(PORT_FILE, JSON.stringify({
                 port: PORT,
                 host: '127.0.0.1',
@@ -153,34 +189,29 @@ function activate(context) {
     });
 
     server.on('error', (err) => {
+        if (err && err.code === 'EADDRINUSE' && !disposed) {
+            // Another window serves the bridge. Keep trying, so that when it closes this one
+            // takes over instead of leaving no bridge at all.
+            console.log(`[TerminalBridge] Port ${PORT} in use by another window; retrying in ${RETRY_MS}ms`);
+            retryTimer = setTimeout(() => {
+                retryTimer = null;
+                if (!disposed && server && !listening) {
+                    try { server.close(); } catch (e) {}
+                    server.listen(PORT, '127.0.0.1');
+                }
+            }, RETRY_MS);
+            return;
+        }
         console.error('[TerminalBridge] Server error:', err);
     });
 
-    context.subscriptions.push({
-        dispose: () => {
-            if (server) {
-                try { server.close(); } catch (e) {}
-                server = null;
-            }
-            try {
-                if (fs.existsSync(PORT_FILE)) {
-                    fs.unlinkSync(PORT_FILE);
-                }
-            } catch (e) {}
-        }
-    });
+    server.listen(PORT, '127.0.0.1');
+
+    context.subscriptions.push({ dispose: stop });
 }
 
 function deactivate() {
-    if (server) {
-        try { server.close(); } catch (e) {}
-        server = null;
-    }
-    try {
-        if (fs.existsSync(PORT_FILE)) {
-            fs.unlinkSync(PORT_FILE);
-        }
-    } catch (e) {}
+    stop();
 }
 
 module.exports = {

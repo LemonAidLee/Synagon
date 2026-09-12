@@ -294,12 +294,29 @@ def pty_available() -> bool:
         return False
 
 
+def _wait_or_stop(process: Any, timeout: float, stop: threading.Event) -> int:
+    """`process.wait(timeout)`, except that setting `stop` kills the process and returns."""
+    deadline = _now() + timeout
+    while True:
+        try:
+            return process.wait(timeout=0.2)
+        except subprocess.TimeoutExpired:
+            if stop.is_set():
+                from orchestrator.launcher import stop_tree
+
+                stop_tree(process)
+                return process.returncode if process.returncode is not None else -1
+            if _now() >= deadline:
+                raise subprocess.TimeoutExpired(getattr(process, "args", ""), timeout)
+
+
 def run_captured(
     cmd: List[str],
     cwd: Optional[str] = None,
     timeout: int = 180,
     sink: Optional[Callable[[str], Any]] = None,
     env: Optional[Dict[str, str]] = None,
+    stop: Optional[threading.Event] = None,
 ) -> CapturedResult:
     """Run a command, publishing its output as it arrives, and return what it produced.
 
@@ -308,15 +325,22 @@ def run_captured(
     *liveness* is new - which is exactly the difference Roadmap §10.5 asked for, and nothing
     above this has to change to get it.
 
+    `stop`, when given and set, ends the command early: it is killed and what it produced so far
+    is returned. It exists for a display process whose owner decides when it is done (the native
+    TUI's `attach`, which does not exit by itself when its server goes away).
+
     Raises:
         subprocess.TimeoutExpired: If the command outlives `timeout`. The caller translates
             this into the project's own CLITimeoutError, as it always has.
     """
+    from orchestrator.process_jobs import finish_owned, spawn_owned
+
     started = _now()
     out_parts: List[str] = []
     err_parts: List[str] = []
 
-    process = subprocess.Popen(
+    # Owned by a kill-on-close job: the agent's tree ends with the daemon, however it ends.
+    process = spawn_owned(
         cmd,
         cwd=cwd or os.getcwd(),
         stdin=subprocess.DEVNULL,
@@ -357,18 +381,22 @@ def run_captured(
         thread.start()
 
     try:
-        returncode = process.wait(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        process.kill()
-        try:
-            process.wait(timeout=5.0)  # reap it - a killed child left running is a leak
-        except subprocess.TimeoutExpired:
-            pass
+        # `_wait_or_stop` waits in short slices, so an interruption is acted on promptly; with
+        # no `stop` event it is simply never set.
+        returncode = _wait_or_stop(process, timeout, stop or threading.Event())
+    except BaseException:
+        # A timeout or an interruption: the agent's whole tree goes, and is reaped. Killing only
+        # the direct child left its children running (measured - see `launcher.stop_tree`).
+        from orchestrator.launcher import stop_tree
+
+        stop_tree(process)
         for thread in threads:
             thread.join(timeout=1.0)
         raise
     for thread in threads:
         thread.join(timeout=5.0)
+    # Anything the agent left running in the background ends with its execution.
+    finish_owned(process)
 
     return CapturedResult(
         returncode=returncode,
@@ -397,8 +425,11 @@ def run_captured_pty(
     timeout: int = 180,
     sink: Optional[Callable[[str], Any]] = None,
     env: Optional[Dict[str, str]] = None,
+    stop: Optional[threading.Event] = None,
 ) -> CapturedResult:
     """Run a command attached to a real pseudo-terminal, publishing output as it arrives.
+
+    `stop` behaves as in `run_captured`: setting it ends the command and returns normally.
 
     Unlike `run_captured`, the child believes it is talking to an interactive terminal -
     which is what lets a program that only colours or formats its output for a human (an
@@ -420,8 +451,8 @@ def run_captured_pty(
             "install pywinpty on Windows, or use run_captured instead"
         )
     if os.name == "nt":
-        return _run_captured_pty_windows(cmd, cwd, timeout, sink, env)
-    return _run_captured_pty_posix(cmd, cwd, timeout, sink, env)
+        return _run_captured_pty_windows(cmd, cwd, timeout, sink, env, stop)
+    return _run_captured_pty_posix(cmd, cwd, timeout, sink, env, stop)
 
 
 def _run_captured_pty_windows(
@@ -430,6 +461,7 @@ def _run_captured_pty_windows(
     timeout: int,
     sink: Optional[Callable[[str], Any]],
     env: Optional[Dict[str, str]],
+    stop: Optional[threading.Event] = None,
 ) -> CapturedResult:
     """The Windows half of `run_captured_pty`, via `pywinpty` (ConPTY).
 
@@ -447,7 +479,26 @@ def _run_captured_pty_windows(
     out_parts: List[str] = []
     done = threading.Event()
 
+    from orchestrator.process_jobs import own_pid
+
     process = winpty.PtyProcess.spawn(cmd, cwd=cwd or os.getcwd(), env=env)
+    # pywinpty creates the process itself, so it cannot be created suspended the way
+    # `spawn_owned` does: it is owned from here on, and anything it starts from here on is too.
+    # Closing the job (the `finally` below, or the kernel when this process dies) ends them all.
+    job = own_pid(getattr(process, "pid", None))
+
+    def _end() -> None:
+        # pywinpty's own terminate first: it is what closes the pseudo console and so ends the
+        # reader's blocking read. Ending the child through the job first left pywinpty looking at
+        # an already-dead process, skipping that close, and the read blocked until its join
+        # timeout (measured: 3.1s instead of 1.1s for a 1s timeout). The job then ends anything
+        # the child started.
+        try:
+            process.terminate(force=True)
+        except Exception:
+            pass
+        if job is not None:
+            job.terminate()
 
     def pump() -> None:
         try:
@@ -474,12 +525,18 @@ def _run_captured_pty_windows(
     reader.start()
 
     try:
-        timed_out = not done.wait(timeout=timeout)
-        if timed_out:
-            try:
-                process.terminate(force=True)
-            except Exception:
+        if stop is None:
+            timed_out = not done.wait(timeout=timeout)
+        else:
+            deadline = started + timeout
+            while not done.wait(timeout=0.2) and not stop.is_set() and _now() < deadline:
                 pass
+            timed_out = not done.is_set() and not stop.is_set()
+            if stop.is_set() and not done.is_set():
+                _end()
+                reader.join(timeout=2.0)
+        if timed_out:
+            _end()
             reader.join(timeout=2.0)
             raise subprocess.TimeoutExpired(cmd, timeout)
 
@@ -508,6 +565,8 @@ def _run_captured_pty_windows(
             process.close()
         except Exception:
             pass
+        if job is not None:
+            job.close()
 
 
 def _run_captured_pty_posix(
@@ -516,6 +575,7 @@ def _run_captured_pty_posix(
     timeout: int,
     sink: Optional[Callable[[str], Any]],
     env: Optional[Dict[str, str]],
+    stop: Optional[threading.Event] = None,
 ) -> CapturedResult:
     """The POSIX half of `run_captured_pty`, via the standard library's `pty` module."""
     import errno
@@ -552,6 +612,9 @@ def _run_captured_pty_posix(
     try:
         while True:
             remaining = deadline - _now()
+            if stop is not None and stop.is_set():
+                process.kill()
+                break
             if remaining <= 0:
                 process.kill()
                 raise subprocess.TimeoutExpired(cmd, timeout)

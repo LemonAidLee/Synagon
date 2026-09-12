@@ -297,7 +297,29 @@ def main() -> int:
         "--agent-execution-mode",
         dest="agent_execution_mode",
         default=None,
-        help="Agent execution mode: 'auto' (prefer native TUI where supported), 'native_tui', or 'headless'.",
+        choices=("auto", "native_tui", "headless"),
+        help=(
+            "Agent execution mode: 'auto' (native TUI where a supported integration and a "
+            "surface exist - OpenCode only - headless elsewhere), 'native_tui' (require it; "
+            "refuses agents without one, never falls back), or 'headless'."
+        ),
+    )
+    parser.add_argument(
+        "--keep-terminals",
+        action="store_false",
+        dest="close_terminal_on_completion",
+        default=None,
+        help=(
+            "Leave visible terminals and native TUI sessions open after they finish "
+            "(execution.close_terminal_on_completion: false for this run)."
+        ),
+    )
+    parser.add_argument(
+        "--close-sessions",
+        action="store_true",
+        dest="close_sessions",
+        default=False,
+        help="Close every native TUI session kept open for inspection, and stop its server.",
     )
     parser.add_argument(
         "--token-diagnostics",
@@ -749,6 +771,23 @@ def main() -> int:
             safe_print()
         return 0
 
+    # --- Native TUI sessions kept open for inspection ----------------------
+    if args.close_sessions:
+        from orchestrator.native_sessions import close_sessions
+
+        outcomes = close_sessions()
+        if not outcomes:
+            safe_print("No native TUI sessions are being kept open.")
+            return 0
+        for outcome in outcomes:
+            safe_print(
+                f"  {outcome.get('session_id')}: terminal "
+                f"{'closed' if outcome.get('terminal_closed') else 'not found'}, server "
+                f"{'stopped' if outcome.get('server_stopped') else 'not stopped'}"
+                f"{' - ' + outcome['note'] if outcome.get('note') else ''}"
+            )
+        return 0
+
     # --- Preflight doctor (Tier 1 #6) --------------------------------------
     if args.doctor:
         try:
@@ -765,6 +804,9 @@ def main() -> int:
             deep=bool(deep),
             strict=bool(cfg.get("strict", True)),
             timeout=int(cfg.get("timeout_seconds", 15)),
+            execution_mode=args.agent_execution_mode,
+            visible_terminals=args.visible_terminals,
+            terminal_type=args.terminal_type,
         )
         safe_print("")
         safe_print(format_preflight_report(report))
@@ -1376,6 +1418,21 @@ def main() -> int:
             safe_print(f"\n{Fore.LIGHTBLACK_EX}--dry-run: nothing was moved.{Style.RESET_ALL}\n")
             return 0
 
+        # Restoring is reversible, so this asks rather than refuses - but it still asks,
+        # because what changes underneath is every number this project reports about itself,
+        # the same reason --archive-runs asks before it moves anything.
+        if not args.assume_yes:
+            if not sys.stdin or not sys.stdin.isatty():
+                safe_print(
+                    f"{Fore.YELLOW}Refusing to move runs without confirmation. "
+                    f"Re-run with --yes (or --dry-run to preview).{Style.RESET_ALL}\n"
+                )
+                return 1
+            answer = input(f"Restore {len(selected)} run(s)? [y/N] ").strip().lower()
+            if answer not in ("y", "yes"):
+                safe_print("Aborted; nothing was moved.\n")
+                return 0
+
         result = execute_restore(plan)
         safe_print("")
         safe_print(format_restore_result(result))
@@ -1454,6 +1511,25 @@ def main() -> int:
         safe_print(f"\n{Fore.CYAN}{Style.BRIGHT}PRUNE RUN BRANCHES{Style.RESET_ALL}\n")
         safe_print(format_prune_plan(plan))
         safe_print("")
+
+        # Empty directories git no longer tracks (a worktree Windows would not let git delete).
+        # Removing an empty directory loses nothing, so this needs no confirmation - only
+        # `--dry-run` holds it back.
+        from orchestrator.workspace import remove_ghost_worktree_dirs
+
+        ghosts = remove_ghost_worktree_dirs(
+            root, get_workspace_config(config).get("directory"), dry_run=bool(args.dry_run)
+        )
+        if ghosts["removed"]:
+            verb = "Would remove" if args.dry_run else "Removed"
+            safe_print(
+                f"{verb} {len(ghosts['removed'])} empty worktree director"
+                f"{'y' if len(ghosts['removed']) == 1 else 'ies'} git no longer tracks."
+            )
+        for kept in ghosts["kept"]:
+            safe_print(f"{Fore.YELLOW}Left alone (not empty, not a worktree):{Style.RESET_ALL} {kept}")
+        if ghosts["removed"] or ghosts["kept"]:
+            safe_print("")
 
         if not plan.get("available"):
             return 1
@@ -1624,6 +1700,8 @@ def main() -> int:
         initial_state["terminal_type"] = args.terminal_type
     if args.agent_execution_mode is not None:
         initial_state["agent_execution_mode"] = args.agent_execution_mode
+    if args.close_terminal_on_completion is not None:
+        initial_state["close_terminal_on_completion"] = args.close_terminal_on_completion
     if args.no_preflight:
         initial_state["skip_preflight"] = True
     if args.no_run_store:
@@ -1728,6 +1806,7 @@ def main() -> int:
                 "visible_terminals",
                 "terminal_type",
                 "agent_execution_mode",
+                "close_terminal_on_completion",
                 "run_store_enabled",
             )
             if key in initial_state
@@ -1831,6 +1910,19 @@ def main() -> int:
 
     if result.get("error"):
         safe_print(f"{Fore.RED}{Style.BRIGHT}Pipeline Error:{Style.RESET_ALL} {result['error']}")
+        # A run that stopped on an error has usually still paid for something - every attempt
+        # of the execution that exhausted its retries, at least - so the spend is shown here as
+        # it is for any other ending, not left to be found in the run store.
+        if result.get("agent_results"):
+            safe_print("")
+            safe_print(
+                format_summary_table(
+                    agent_results=result.get("agent_results") or [],
+                    verification_verdict=None,
+                    repair_attempts=int(result.get("repair_attempts") or 0),
+                )
+            )
+            safe_print("")
         return 1
 
 

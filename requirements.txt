@@ -2,13 +2,6 @@
 langgraph
 langgraph-cli[inmem]
 
-# Model provider integrations
-langchain-anthropic
-langchain-google-genai
-langchain-openai
-
-# Configuration & environment management
-python-dotenv
 colorama  # Required on Windows for colored console logging
 
 # The daemon's live agent terminal (Roadmap Phase 10): a real pseudo-terminal on Windows,

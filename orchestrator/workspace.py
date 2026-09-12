@@ -426,6 +426,77 @@ def prune_worktree_registry(project_root: str) -> bool:
         return False
 
 
+def _remove_if_empty(path: str) -> bool:
+    """Remove a directory only if it is empty (`os.rmdir` refuses anything else). Never raises."""
+    import os
+
+    try:
+        if path and os.path.isdir(path):
+            os.rmdir(path)
+            return True
+    except OSError:
+        pass
+    return False
+
+
+#: A directory younger than this may be a worktree `git worktree add` is creating right now, for a
+#: run in another lane; it is never swept.
+GHOST_MIN_AGE_SECONDS = 60
+
+
+def remove_ghost_worktree_dirs(
+    project_root: str,
+    directory: Optional[str] = None,
+    dry_run: bool = False,
+    min_age_seconds: float = GHOST_MIN_AGE_SECONDS,
+) -> Dict[str, List[str]]:
+    """Remove *empty* directories under the worktrees root that git no longer tracks. Never raises.
+
+    On Windows git can deregister a worktree whose directory it could not delete (a file lock),
+    leaving an empty directory behind that no retention path ever touched: `finish_worktree`,
+    `prune_worktree_registry` and `--prune-runs` all act on git's records, not on the filesystem,
+    and the Explorer merely stopped showing them (ARCHITECTURE.md §30.3 - ten on this machine).
+
+    Only a directory that is not a registered worktree *and* is empty is removed, and it is
+    removed with `os.rmdir`, which refuses anything non-empty - so no file, committed or not,
+    can be lost this way (invariant 4). A non-empty unregistered directory is reported under
+    ``kept`` and left for a person. With `dry_run`, ``removed`` lists what would be removed and
+    nothing is touched.
+    """
+    import os
+    import time
+
+    outcome: Dict[str, List[str]] = {"removed": [], "kept": []}
+    try:
+        rel = directory or DEFAULT_WORKTREES_DIR
+        base = Path(rel) if Path(rel).is_absolute() else Path(project_root) / rel
+        if not base.is_dir():
+            return outcome
+        registered = {
+            os.path.normcase(os.path.abspath(str(entry.get("path") or "")))
+            for entry in list_worktrees(project_root)
+        }
+        for candidate in sorted(base.iterdir()):
+            if not candidate.is_dir():
+                continue
+            if os.path.normcase(os.path.abspath(str(candidate))) in registered:
+                continue
+            try:
+                if time.time() - candidate.stat().st_mtime < float(min_age_seconds):
+                    continue
+                if dry_run:
+                    empty = not any(candidate.iterdir())
+                    outcome["removed" if empty else "kept"].append(str(candidate))
+                    continue
+                os.rmdir(candidate)
+                outcome["removed"].append(str(candidate))
+            except OSError:
+                outcome["kept"].append(str(candidate))
+    except Exception:
+        pass
+    return outcome
+
+
 def finish_worktree(
     workspace: WorkspaceInfo,
     keep_worktree: bool = False,
@@ -477,6 +548,9 @@ def finish_worktree(
     ahead = commits_ahead(workspace)
     if not remove_worktree(workspace):
         outcome["retained_reason"] = "git refused to remove the worktree"
+        # If git deregistered it but Windows would not let the directory go, an empty shell is
+        # all that is left; one with anything in it is refused by rmdir and stays.
+        _remove_if_empty(path)
         return outcome
     outcome["removed"] = True
 
@@ -489,6 +563,10 @@ def finish_worktree(
             outcome["branch_deleted"] = True
 
     prune_worktree_registry(workspace.get("project_root") or "")
+    # The ghost-worktree case (§26): git has let go of the path but a file lock kept the empty
+    # directory. This run's own directory only - sweeping the whole root here could race a
+    # parallel run creating its worktree (that sweep is `--prune-runs`'s, with an age guard).
+    _remove_if_empty(path)
     return outcome
 
 

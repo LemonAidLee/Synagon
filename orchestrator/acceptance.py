@@ -153,14 +153,20 @@ def run_acceptance(
         merged_env = dict(os.environ)
         merged_env.update(env)
 
+    from orchestrator.launcher import stop_tree
+    from orchestrator.process_jobs import finish_owned, spawn_owned
+
+    # Owned by a kill-on-close job, and stopped as a whole tree: a test runner's own children
+    # (pytest workers, a dev server a test started) end with the gate, on a timeout and on a hard
+    # kill of the orchestrator alike. `subprocess.run` stopped only the direct child.
     try:
-        completed = subprocess.run(
+        process = spawn_owned(
             argv,
             cwd=working_dir,
             shell=False,
             stdin=subprocess.DEVNULL,
-            capture_output=True,
-            timeout=max(1, int(timeout_seconds)),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             env=merged_env,
         )
     except FileNotFoundError:
@@ -170,21 +176,29 @@ def run_acceptance(
         )
         record["duration_seconds"] = round(time.time() - started, 2)
         return record
-    except subprocess.TimeoutExpired:
-        record["error"] = f"the acceptance command exceeded its {timeout_seconds}s timeout"
-        record["duration_seconds"] = round(time.time() - started, 2)
-        return record
     except Exception as exc:  # pragma: no cover - platform dependent
         record["error"] = f"the acceptance command could not be run: {exc}"
         record["duration_seconds"] = round(time.time() - started, 2)
         return record
 
-    stdout = (completed.stdout or b"").decode("utf-8", errors="replace")
-    stderr = (completed.stderr or b"").decode("utf-8", errors="replace")
+    try:
+        raw_stdout, raw_stderr = process.communicate(timeout=max(1, int(timeout_seconds)))
+    except subprocess.TimeoutExpired:
+        stop_tree(process)
+        record["error"] = f"the acceptance command exceeded its {timeout_seconds}s timeout"
+        record["duration_seconds"] = round(time.time() - started, 2)
+        return record
+    except BaseException:
+        stop_tree(process)
+        raise
+    finish_owned(process)
+
+    stdout = (raw_stdout or b"").decode("utf-8", errors="replace")
+    stderr = (raw_stderr or b"").decode("utf-8", errors="replace")
     combined = stdout if not stderr else f"{stdout}\n{stderr}" if stdout else stderr
 
-    record["exit_code"] = completed.returncode
-    record["ok"] = completed.returncode == 0
+    record["exit_code"] = process.returncode
+    record["ok"] = process.returncode == 0
     record["output"] = _trim(combined.strip(), output_limit)
     record["duration_seconds"] = round(time.time() - started, 2)
     return record

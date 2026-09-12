@@ -35,15 +35,21 @@ Load-bearing rules
   does.
 """
 
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from orchestrator.store import (
+    EVENT_ACCEPTANCE,
     EVENT_AGENT_RESULT,
+    EVENT_AGENT_RETRY,
+    EVENT_AGENT_STARTED,
+    EVENT_RUN_RESUMED,
     EVENT_RUN_STARTED,
     EVENT_VERIFICATION,
     load_run,
     resolve_run_id,
 )
+from orchestrator.types import unavailable_token_usage, usage_total
 from orchestrator.workspace import WorkspaceInfo, reattach_run_worktree
 
 #: Marks a record that came out of a stored run rather than this process.
@@ -88,6 +94,7 @@ def reconstruct_state(
 
     agent_results: List[Dict[str, Any]] = []
     verification_history: List[Dict[str, Any]] = []
+    acceptance_checks: List[Dict[str, Any]] = []
     workspace: Optional[WorkspaceInfo] = None
     task = run.get("task") or ""
     root = project_root or run.get("project_root")
@@ -110,6 +117,11 @@ def reconstruct_state(
             if record:
                 record[RESTORED] = True
                 verification_history.append(record)
+        elif name == EVENT_ACCEPTANCE:
+            check = dict(event.get("check") or {})
+            if check:
+                check[RESTORED] = True
+                acceptance_checks.append(check)
         elif name == "workspace":
             candidate = event.get("workspace")
             if isinstance(candidate, dict):
@@ -124,6 +136,15 @@ def reconstruct_state(
         "resumed_from": run.get("run_id"),
         "run_id": run.get("run_id"),
         "run_dir": run.get("run_dir"),
+        # The gate results are evidence the recorded verdicts were given against. A replayed
+        # verification must be judged with the gate its verifier saw, not with a fresh run of
+        # the command over a workspace that may have changed since (see `should_replay_gate`).
+        "acceptance_checks": acceptance_checks,
+        "interrupted_attempts": orphaned_attempts(events),
+        # The wall-clock budget is a ceiling on the *run*, and a resumed run is the same run
+        # continuing: the time its earlier sessions were working counts against it. The time it
+        # spent stopped does not - a run resumed the next morning is not twelve hours over.
+        "prior_elapsed_seconds": active_seconds(events),
     }
     if max_repair_attempts is not None:
         state["max_repair_attempts"] = int(max_repair_attempts)
@@ -152,6 +173,184 @@ def repairs_completed(
         if isinstance(attempts, int):
             spent = max(spent, attempts)
     return spent
+
+
+def _timestamp(event: Dict[str, Any]) -> Optional[float]:
+    raw = event.get("timestamp")
+    if not isinstance(raw, str) or not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
+
+
+def active_seconds(events: List[Dict[str, Any]]) -> float:
+    """How long a run's sessions were working, summed: the time a resumed run has already used.
+
+    A session runs from its `run_started` (or `run_resumed`) event to the last event it wrote.
+    The gap between one session's last event and the next session's start - the process was
+    dead, or nobody had resumed it yet - is not counted: it spent nothing. What a killed session
+    did after its last event is unknowable and is not guessed at, so this is a floor.
+    """
+    total = 0.0
+    start: Optional[float] = None
+    last: Optional[float] = None
+    for event in events or []:
+        stamp = _timestamp(event)
+        if stamp is None:
+            continue
+        if event.get("event") in (EVENT_RUN_STARTED, EVENT_RUN_RESUMED):
+            if start is not None and last is not None:
+                total += max(0.0, last - start)
+            start = last = stamp
+        elif start is not None:
+            last = stamp
+    if start is not None and last is not None:
+        total += max(0.0, last - start)
+    return round(total, 2)
+
+
+#: Why an execution that was running when its process stopped is an attempt with unknown spend.
+IN_FLIGHT_REASON = "in flight when the orchestrator stopped; it never reported its usage"
+
+
+def orphaned_attempts(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Attempts whose spend no recorded result accounts for.
+
+    Two kinds, both marked ``interrupted`` and shaped like `attempt_token_usage` entries:
+
+    * **A failed attempt the process died after.** A failed attempt's usage reaches the durable
+      record twice: on its `agent_retry` event, at the moment it failed, and on the phase's
+      eventual `AgentResult` (`attempt_token_usage`), which is what every total reads. A process
+      killed between the two leaves the spend only on the event, and a resume that reads results
+      alone would never count it: measured, a hard kill after a failed attempt that reported
+      700 tokens resumed to a total 700 lower than what was paid.
+    * **The attempt the process died during** (Package C). An `agent_started` with no result
+      after it was running when the process stopped. Whatever it cost was never reported, so it
+      is recorded as an attempt with *unavailable* usage (`in_flight`): the run's total becomes
+      a floor that says so, instead of a complete-looking number that silently omits it
+      (invariant 5). Its tokens are never estimated. An execution that was between attempts (in
+      a retry's backoff) when it stopped is indistinguishable here and is marked the same way:
+      the error is in the direction of saying "incomplete", never of inventing a number.
+
+    An event is matched to the result that later carried it by role, attempt number, agent,
+    model and reported total, so interleaved ensemble members cannot claim each other's
+    attempts. A `run_resumed` event closes every execution still open before it: a new session
+    means the previous process is gone. What is left over is returned, oldest first.
+    """
+    pending: List[Dict[str, Any]] = []
+    running: List[Dict[str, Any]] = []  # executions started and not yet ended, oldest first
+
+    def end_running(role: Any, agent: Any, model: Any) -> None:
+        mine = [e for e in running if e["role"] == role]
+        if not mine:
+            return
+        exact = [e for e in mine if (e["agent"], e["model"]) == (agent, model)]
+        running.remove((exact or mine)[0])
+
+    def abandon_running(executions: Optional[List[Dict[str, Any]]] = None) -> None:
+        chosen = list(running) if executions is None else list(executions)
+        for execution in chosen:
+            running.remove(execution)
+            pending.append(
+                {
+                    "role": execution["role"],
+                    "attempt": execution["attempts"] + 1,
+                    "agent": execution["agent"],
+                    "model": execution["model"],
+                    "reason": IN_FLIGHT_REASON,
+                    "token_usage": unavailable_token_usage(),
+                    "interrupted": True,
+                    "in_flight": True,
+                }
+            )
+
+    for event in events or []:
+        name = event.get("event")
+        if name == EVENT_AGENT_STARTED:
+            running.append(
+                {
+                    "role": event.get("role"),
+                    "agent": event.get("agent"),
+                    "model": event.get("model"),
+                    "attempts": 0,
+                }
+            )
+        elif name == EVENT_RUN_RESUMED:
+            abandon_running()
+        elif name == EVENT_AGENT_RETRY:
+            for execution in running:
+                if execution["role"] == event.get("role") and (
+                    execution["agent"], execution["model"]
+                ) == (event.get("agent"), event.get("model")):
+                    # The next attempt runs on the rung the retry stepped to.
+                    execution["attempts"] = int(event.get("attempt") or execution["attempts"] + 1)
+                    execution["agent"] = event.get("next_agent") or execution["agent"]
+                    execution["model"] = event.get("next_model", execution["model"])
+                    break
+            pending.append(
+                {
+                    "role": event.get("role"),
+                    "attempt": event.get("attempt"),
+                    "agent": event.get("agent"),
+                    "model": event.get("model"),
+                    "reason": event.get("reason"),
+                    # An attempt with no recorded usage is still an attempt: it makes the total
+                    # incomplete rather than disappearing (invariant 5).
+                    "token_usage": dict(event.get("token_usage") or unavailable_token_usage()),
+                    "interrupted": True,
+                }
+            )
+        elif name == EVENT_AGENT_RESULT:
+            result = event.get("result") or {}
+            carried = [a for a in result.get("attempt_token_usage") or [] if a.get("interrupted")]
+            mine = [e for e in running if e["role"] == result.get("role")]
+            if carried and mine:
+                # A result carrying interrupted attempts is, by construction, the execution that
+                # replaced a killed one (graph._inherited_attempts). Its own start is the newest
+                # open execution of its role; any older one still open is the execution the
+                # process died during - closed here even when no `run_resumed` marks the session
+                # boundary, and then matched below against what this result carried.
+                running.remove(mine[-1])
+                abandon_running(mine[:-1])
+            else:
+                end_running(result.get("role"), result.get("agent"), result.get("model"))
+            for spent in result.get("attempt_token_usage") or []:
+                for index, candidate in enumerate(pending):
+                    if (
+                        candidate["role"] == result.get("role")
+                        and candidate["attempt"] == spent.get("attempt")
+                        and candidate["agent"] == spent.get("agent")
+                        and candidate["model"] == spent.get("model")
+                        and usage_total(candidate["token_usage"]) == usage_total(spent.get("token_usage"))
+                    ):
+                        del pending[index]
+                        break
+    abandon_running()
+    return pending
+
+
+def should_replay_gate(state: Any, repair_attempts: int) -> bool:
+    """Return True when the acceptance gate for this repair generation must not be re-run.
+
+    The gate is replayed exactly when the verification it fed is replayed. Re-running it then
+    would pair the recorded verdict with evidence gathered over a different workspace - a
+    process killed partway through a repair leaves that repair's edits on disk, and a fresh
+    gate over them combined with the replayed PASS of a verifier that never saw them was
+    measured to end a run `completed` with the repair neither recorded nor verified. When the
+    verification is *not* replayed (none was recorded, or it was BLOCKED and a person has
+    acted), the gate runs fresh, because a fresh verifier will be judging a fresh workspace.
+    """
+    if not state or not state.get("resumed_from"):
+        return False
+    generation = int(repair_attempts or 0)
+    recorded = [
+        check
+        for check in state.get("acceptance_checks") or []
+        if check.get(RESTORED) and int(check.get("repair_attempts") or 0) == generation
+    ]
+    return bool(recorded) and should_replay(state, "verifier", repair_attempts=generation)
 
 
 def _restored(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

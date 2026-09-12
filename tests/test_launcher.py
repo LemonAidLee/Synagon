@@ -235,8 +235,12 @@ class TestProcessLauncherUnit(unittest.TestCase):
         called_args = mock_popen.call_args[0][0]
         called_kwargs = mock_popen.call_args[1]
 
-        # Verify CREATE_NEW_CONSOLE (0x00000010) was passed
-        self.assertEqual(called_kwargs.get("creationflags"), 0x00000010)
+        # Verify CREATE_NEW_CONSOLE (0x00000010) was passed. On Windows the runner is also
+        # created suspended (CREATE_SUSPENDED, 0x4) so it can be owned by a job before it runs
+        # (process_jobs.spawn_owned); no other flag may appear.
+        flags = called_kwargs.get("creationflags")
+        self.assertTrue(flags & 0x00000010)
+        self.assertEqual(flags & ~0x00000004, 0x00000010)
         self.assertIn("-m", called_args)
         self.assertIn("orchestrator.launcher", called_args)
 

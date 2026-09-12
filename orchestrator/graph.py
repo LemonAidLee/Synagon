@@ -8,7 +8,8 @@ from langgraph.graph import StateGraph, START, END
 
 from orchestrator.agents.antigravity import run_antigravity
 from orchestrator.agents.claude_code import run_claude_code
-from orchestrator.agents.opencode import run_opencode
+from orchestrator.agents.exceptions import NativeTUIUnavailableError
+from orchestrator.agents.opencode import EXECUTION_MODES, run_opencode
 from orchestrator.agents.verifier import (
     VERDICT_BLOCKED,
     VERDICT_PASS,
@@ -60,10 +61,10 @@ from orchestrator.preflight import (
     run_preflight,
     skipped_report,
 )
-from orchestrator.resume import should_replay
+from orchestrator.resume import should_replay, should_replay_gate
 from orchestrator.skills.types import SkillInfo
 from orchestrator.skills.discovery import discover_skills
-from orchestrator.skills.registry import format_skill_manifest
+from orchestrator.skills.registry import format_skill_manifest, rebase_skill_paths
 from orchestrator.status import (
     derive_blocked_reason,
     derive_status,
@@ -119,6 +120,7 @@ class OrchestratorState(TypedDict, total=False):
     visible_terminals: Optional[bool]
     terminal_type: Optional[str]
     pause_on_completion: Optional[float]
+    close_terminal_on_completion: Optional[bool]
     agent_execution_mode: Optional[str]
     # Tier 1 #6 - preflight
     preflight: Optional[PreflightReport]
@@ -140,8 +142,14 @@ class OrchestratorState(TypedDict, total=False):
     budget_state: Optional[dict]
     budget_exhausted_reason: Optional[str]
     run_started_at: Optional[float]
+    # How long earlier sessions of this same run were working (resume.active_seconds). The time
+    # budget and the reported duration continue from it rather than restarting on resume.
+    prior_elapsed_seconds: Optional[float]
     # Tier 1 #4 - resume: facts replayed from a previous run's event log
     resumed_from: Optional[str]
+    # Failed attempts a killed process recorded only as `agent_retry` events; the phase that
+    # re-runs them carries their spend on its one result (resume.orphaned_attempts)
+    interrupted_attempts: Optional[List[Dict[str, Any]]]
     # Phase 0 - objective acceptance gate: a command the orchestrator ran itself
     acceptance_checks: Annotated[List[Dict[str, Any]], add]
     acceptance_required: Optional[bool]
@@ -247,7 +255,19 @@ def context_node(state: OrchestratorState) -> OrchestratorState:
         pause_secs = state.get("pause_on_completion")
         if pause_secs is None:
             pause_secs = exec_cfg.get("pause_on_completion", 1.5)
-        agent_exec_mode = state.get("agent_execution_mode") or exec_cfg.get("agent_execution_mode", "auto")
+        close_terms = state.get("close_terminal_on_completion")
+        if close_terms is None:
+            close_terms = exec_cfg.get("close_terminal_on_completion", True)
+        agent_exec_mode = str(
+            state.get("agent_execution_mode") or exec_cfg.get("agent_execution_mode", "auto")
+        ).strip().lower()
+        if agent_exec_mode not in EXECUTION_MODES:
+            # A mode can arrive from the CLI or the daemon as well as from validated config. An
+            # unknown one must stop the run, not quietly select some other execution path.
+            raise ValueError(
+                f"Invalid agent_execution_mode '{agent_exec_mode}'. "
+                f"Must be one of: {', '.join(EXECUTION_MODES)}"
+            )
 
         default_tracer.log_context_complete(root)
 
@@ -357,6 +377,15 @@ def context_node(state: OrchestratorState) -> OrchestratorState:
                 ),
             }
 
+        # Agents act on the absolute paths they are shown, so an isolated run's context names
+        # the worktree they execute in, never the user's checkout (invariant 3).
+        if isinstance(workspace, dict) and workspace.get("isolated") and workspace.get("path"):
+            context = collect_project_context(root, working_directory=workspace["path"])
+            # The skill manifest is the other absolute path every prompt carries.
+            if discovered_skills:
+                discovered_skills = rebase_skill_paths(discovered_skills, root, workspace["path"])
+                manifest = format_skill_manifest(discovered_skills)
+
         # NOTE: `agent_results` and `verification_history` use `add` reducers, so
         # returning their existing contents would append a second copy. Seed them
         # only when they are genuinely empty.
@@ -371,6 +400,7 @@ def context_node(state: OrchestratorState) -> OrchestratorState:
             "visible_terminals": visible_terms,
             "terminal_type": term_type,
             "pause_on_completion": float(pause_secs),
+            "close_terminal_on_completion": bool(close_terms),
             "agent_execution_mode": str(agent_exec_mode),
             "consensus_policy": state.get("consensus_policy") or get_consensus_policy(config),
             # A run's cost ceiling and the clock it is measured against. Seeded
@@ -419,6 +449,9 @@ def preflight_node(state: OrchestratorState) -> OrchestratorState:
         deep=bool(cfg.get("deep", False)),
         strict=bool(cfg.get("strict", True)),
         timeout=int(cfg.get("timeout_seconds", 15)),
+        execution_mode=state.get("agent_execution_mode"),
+        visible_terminals=state.get("visible_terminals"),
+        terminal_type=state.get("terminal_type"),
     )
 
     store = _get_store(state)
@@ -443,12 +476,25 @@ def preflight_node(state: OrchestratorState) -> OrchestratorState:
 # We must not use a static RUNNERS dictionary, because unittest.mock.patch
 # patches the module-level names, and a static dict captures the original 
 # functions at import time.
+class UnknownAgentError(ValueError):
+    """An agent name this orchestrator has no runner for. Never retried, never substituted."""
+
+
 def get_runner(agent_name: str) -> Callable:
     import orchestrator.graph as mod
     if agent_name == "antigravity": return mod.run_antigravity
     if agent_name == "claude": return mod.run_claude_code
     if agent_name == "opencode": return mod.run_opencode
-    return mod.run_claude_code
+    # This used to return Claude for any name it did not know. A catalog may list a provider
+    # there is no runner for, and preflight can be skipped, so a role assigned to one ran as
+    # Claude and the run looked fine. The assignment is the user's; running someone else is not
+    # a fallback, it is a different run.
+    from orchestrator.config import RUNNABLE_AGENTS
+
+    raise UnknownAgentError(
+        f"there is no runner for agent '{agent_name}'. This orchestrator can run: "
+        f"{', '.join(RUNNABLE_AGENTS)}. It does not substitute another agent."
+    )
 
 def _join_role_outputs(existing_results: List[AgentResult], role: str) -> str:
     outputs = get_latest_role_outputs(existing_results, role)
@@ -462,6 +508,40 @@ def _join_role_outputs(existing_results: List[AgentResult], role: str) -> str:
         agent = res.get("agent", "unknown")
         joined.append(f"--- {role.capitalize()} ({agent} #{i}) ---\n{res.get('output', '')}")
     return "\n\n".join(joined)
+
+
+def _inherited_attempts(
+    state: OrchestratorState,
+    role_name: str,
+    is_repair: bool,
+    agent_index: Optional[int],
+    config: Dict[str, Any],
+) -> List[Dict[str, Any]]:
+    """The interrupted attempts (resume.orphaned_attempts) this execution must carry.
+
+    Only the first execution of a role in a resumed session can be the one the killed process
+    was in the middle of: every earlier execution of that role finished and recorded a result,
+    which is what made its retry events not orphans. Of a parallel phase, only its first member
+    carries them - parallel members read the same state, and two carrying them would count
+    them twice.
+    """
+    pending = [a for a in state.get("interrupted_attempts") or [] if a.get("role") == role_name]
+    if not pending:
+        return []
+    if any(
+        r.get("role") == role_name and not r.get("restored")
+        for r in state.get("agent_results") or []
+    ):
+        return []
+    agents = (config or {}).get("agents") or []
+    if (
+        not is_repair
+        and agent_index is not None
+        and 0 < agent_index < len(agents)
+        and agents[agent_index - 1].get("role") == agents[agent_index].get("role")
+    ):
+        return []
+    return pending
 
 
 def make_role_node(
@@ -531,6 +611,7 @@ def make_role_node(
         visible = bool(state.get("visible_terminals", False))
         term_type = str(state.get("terminal_type", "auto"))
         pause_secs = float(state.get("pause_on_completion", 1.5))
+        close_terms = state.get("close_terminal_on_completion") is not False
         agent_exec_mode = str(state.get("agent_execution_mode", "auto"))
 
         max_repair_attempts = state.get("max_repair_attempts", 2)
@@ -701,7 +782,25 @@ def make_role_node(
         max_backoff = float(retry_cfg.get("max_backoff_seconds", 30.0))
         escalate = bool(retry_cfg.get("escalate_model", True)) and has_ladder
 
-        attempt_failures: List[str] = []
+        # Attempts a killed process made at this very phase survive only as `agent_retry` events.
+        # This execution is the one that replaces them, so its result carries their spend -
+        # counted once, attributed to the rung that spent it, marked as from before the resume.
+        inherited = _inherited_attempts(state, role_name, is_repair, agent_index, config)
+        attempt_failures: List[str] = [
+            f"attempt {a.get('attempt')} (before resume): {a.get('reason') or 'interrupted'}"
+            for a in inherited
+        ]
+        # What each failed attempt reported spending, attributed to the rung that spent it. A
+        # provider that returns `SUCCESS` with an empty reply (§9.0) still reports - and bills -
+        # the tokens it burned thinking, so the next attempt must not overwrite them.
+        attempt_token_usage: List[Dict[str, Any]] = [
+            {
+                key: a.get(key)
+                for key in ("attempt", "agent", "model", "token_usage", "interrupted", "in_flight")
+                if key != "in_flight" or a.get(key)
+            }
+            for a in inherited
+        ]
         output_text = ""
         token_usage = unavailable_token_usage()
         exec_mode = "headless"
@@ -710,14 +809,15 @@ def make_role_node(
 
         for attempt in range(1, max_attempts + 1):
             fatal_exception = None
+            non_retryable = False
             start_time = time.time()
             # Resolved per attempt, not once: a rung names an agent as well as a model, so
             # escalating can change which binary runs, and the terminal it runs in must say
             # whose it is. When the ladder is models-only both are the same every time,
             # which is the previous behaviour exactly.
-            runner = get_runner(agent_name)
             term_title = get_terminal_title(agent_name, title_args[0], **title_args[1])
             try:
+                runner = get_runner(agent_name)
                 kwargs = {
                     "working_dir": project_root,
                     "model": model_name,
@@ -726,6 +826,7 @@ def make_role_node(
                     "role": role_name,
                     "terminal_type": term_type,
                     "pause_on_completion": pause_secs,
+                    "close_on_completion": close_terms,
                     "tracer": default_tracer,
                     "agent_execution_mode": agent_exec_mode,
                     "return_usage": True,
@@ -758,12 +859,31 @@ def make_role_node(
                 detail = str(exc) if str(exc).strip() else repr(exc)
                 reason = f"node error ({type(exc).__name__}): {detail}"
                 output_text = ""
-                token_usage = unavailable_token_usage()
+                # A failure can still have been paid for (a turn that errored after several
+                # steps); the adapter attaches what was reported, and unknown stays unknown.
+                token_usage = getattr(exc, "token_usage", None) or unavailable_token_usage()
+                # `native_tui` that cannot be provided is a fact about this agent and this
+                # machine, not a flake: a second attempt would get the same answer. Nothing
+                # ran, in either mode, so the result claims no execution mode at all.
+                # An agent with no runner is the same kind of fact: nothing was launched.
+                non_retryable = isinstance(exc, (NativeTUIUnavailableError, UnknownAgentError))
+                if non_retryable:
+                    exec_mode = None
 
             attempt_failures.append(f"attempt {attempt}: {reason}")
 
-            if attempt >= max_attempts:
+            if attempt >= max_attempts or non_retryable:
                 break
+
+            attempt_token_usage.append(
+                {
+                    "attempt": attempt,
+                    "agent": agent_name,
+                    "model": model_name,
+                    "duration_seconds": duration,
+                    "token_usage": token_usage,
+                }
+            )
 
             # Widen the gap, and step down the ladder if one is configured. The next rung is
             # a *stronger* pairing by convention, which is the same bet the repair ladder
@@ -779,13 +899,13 @@ def make_role_node(
             default_tracer.log_agent_retry(
                 agent=agent_name, role=role_name, attempt=attempt, of=max_attempts,
                 reason=reason, model=model_name, next_model=next_model,
-                next_agent=next_agent, backoff_seconds=backoff,
+                next_agent=next_agent, backoff_seconds=backoff, token_usage=token_usage,
             )
             if store is not None:
                 store.record_agent_retry(
                     agent=agent_name, role=role_name, attempt=attempt, of=max_attempts,
                     reason=reason, model=model_name, next_model=next_model,
-                    next_agent=next_agent, backoff_seconds=backoff,
+                    next_agent=next_agent, backoff_seconds=backoff, token_usage=token_usage,
                 )
 
             agent_name, model_name = next_agent, next_model
@@ -808,8 +928,8 @@ def make_role_node(
                     )
                 else:
                     err_msg = f"{agent_name} returned empty output for {role_name}"
-                if max_attempts > 1:
-                    err_msg += f" (after {max_attempts} attempts)"
+                if len(attempt_failures) > 1:
+                    err_msg += f" (after {len(attempt_failures)} attempts)"
 
                 default_tracer.log_agent_error(agent_name, role_name, err_msg, model=model_name)
                 error_result = create_agent_result(
@@ -820,6 +940,7 @@ def make_role_node(
                     execution_mode=exec_mode,
                     attempts=len(attempt_failures) or 1,
                     attempt_failures=list(attempt_failures),
+                    attempt_token_usage=attempt_token_usage,
                 )
                 store = _get_store(state)
                 if store is not None:
@@ -860,6 +981,7 @@ def make_role_node(
                 # the result can carry it to `--stats`.
                 attempts=len(attempt_failures) + 1,
                 attempt_failures=list(attempt_failures) or None,
+                attempt_token_usage=attempt_token_usage,
             )
 
             store = _get_store(state)
@@ -924,9 +1046,12 @@ def make_role_node(
             detail = str(exc) if str(exc).strip() else repr(exc)
             err_msg = f"{agent_name} ({role_name}) node error ({type(exc).__name__}): {detail}"
             default_tracer.log_agent_error(agent_name, role_name, err_msg, model=model_name)
+            # The agent did run and did report usage before this went wrong; losing that here
+            # would make a bookkeeping failure an accounting one too.
             error_result = create_agent_result(
                 agent=agent_name, role=role_name, status="error", output=err_msg,
-                duration_seconds=duration, model=model_name,
+                duration_seconds=duration, model=model_name, token_usage=token_usage,
+                execution_mode=exec_mode, attempt_token_usage=attempt_token_usage,
             )
             store = _get_store(state)
             if store is not None:
@@ -953,6 +1078,12 @@ def acceptance_node(state: OrchestratorState) -> OrchestratorState:
     repair_attempts = int(state.get("repair_attempts") or 0)
 
     if not parse_command(command):
+        return {}
+
+    # A resumed run whose verification of this generation is replayed keeps the gate result
+    # that verification was given against (it is already in state, restored from the log).
+    if should_replay_gate(state, repair_attempts):
+        default_tracer.log_phase_replayed("acceptance", agent="orchestrator")
         return {}
 
     default_tracer.log_acceptance_start(parse_command(command))
@@ -1177,7 +1308,13 @@ def finalize_node(state: OrchestratorState) -> OrchestratorState:
     summary["workspace"] = workspace_summary
     started = state.get("run_started_at")
     if isinstance(started, (int, float)) and started > 0:
-        summary["duration_seconds"] = round(time.time() - float(started), 2)
+        session_seconds = round(time.time() - float(started), 2)
+        prior = float(state.get("prior_elapsed_seconds") or 0.0)
+        # A resumed run's duration is the whole run's working time, which is what its time
+        # budget was measured against; this session's share is kept beside it.
+        summary["duration_seconds"] = round(prior + session_seconds, 2)
+        if prior:
+            summary["session_duration_seconds"] = session_seconds
 
     store = _get_store(state)
     if store is not None:

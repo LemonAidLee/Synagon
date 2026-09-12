@@ -6,7 +6,7 @@ import shutil
 import subprocess
 from typing import Optional, List, Tuple, Any
 
-from orchestrator.agents.exceptions import CLIExecutionError, CLITimeoutError
+from orchestrator.agents.exceptions import CLIExecutionError, NativeTUIUnavailableError
 from orchestrator.launcher import run_agent_cli
 from orchestrator.types import TokenUsage, create_token_usage, unavailable_token_usage
 
@@ -128,11 +128,18 @@ def run_claude_code_with_usage(
     pause_on_completion: float = 1.5,
     tracer: Optional[object] = None,
     agent_execution_mode: str = "auto",
+    close_on_completion: bool = True,
 ) -> Tuple[str, TokenUsage]:
-    """Execute Claude Code CLI and return both response text and structured TokenUsage."""
+    """Execute Claude Code CLI and return both response text and structured TokenUsage.
+
+    Always headless (`claude -p --output-format json`), optionally shown in a visible terminal.
+    Claude Code's interactive TUI exists, but there is no supported programmatic way to deliver
+    a prompt to it and detect that its turn finished, so `native_tui` is refused rather than
+    faked.
+    """
     exec_mode_str = (agent_execution_mode or "auto").strip().lower()
     if exec_mode_str == "native_tui":
-        raise CLIExecutionError(
+        raise NativeTUIUnavailableError(
             "Claude Code does not expose an official programmatic TUI control bridge. "
             "Use agent_execution_mode: auto or headless."
         )
@@ -165,15 +172,24 @@ def run_claude_code_with_usage(
         terminal_type=terminal_type,
         pause_on_completion=pause_on_completion,
         tracer=tracer,
+        close_on_completion=close_on_completion,
     )
 
     if exec_result.returncode != 0:
+        # A failed `-p --output-format json` run still prints its result object, usage included
+        # (measured on 2.1.267: exit 1, `is_error: true`, a full `usage` block). A failure after
+        # the model has worked is billed, so what was reported travels with the error.
+        detail, usage = parse_claude_output(exec_result.stdout)
+        message = f"Claude Code CLI execution failed with code {exec_result.returncode}"
+        if detail and detail != (exec_result.stdout or "").strip():
+            message += f": {detail[:300]}"
         raise CLIExecutionError(
-            message=f"Claude Code CLI execution failed with code {exec_result.returncode}",
+            message=message,
             returncode=exec_result.returncode,
             stdout=exec_result.stdout,
             stderr=exec_result.stderr,
             command=cmd,
+            token_usage=usage if usage.get("available") else None,
         )
 
     output_text, token_usage = parse_claude_output(exec_result.stdout)
@@ -194,6 +210,7 @@ def run_claude_code(
     tracer: Optional[object] = None,
     agent_execution_mode: str = "auto",
     return_usage: bool = False,
+    close_on_completion: bool = True,
 ) -> Any:
     """Execute Claude Code CLI in non-interactive print mode and return response text."""
     text, usage = run_claude_code_with_usage(
@@ -209,9 +226,9 @@ def run_claude_code(
         pause_on_completion=pause_on_completion,
         tracer=tracer,
         agent_execution_mode=agent_execution_mode,
+        close_on_completion=close_on_completion,
     )
     if return_usage:
         return text, usage
-    return text
     return text
 

@@ -409,8 +409,11 @@ class TestPreflight(unittest.TestCase):
             "opencode": lambda: "C:/bin/opencode.exe",
         }
         config = load_config(None, os.getcwd())
+        # This project's own config opens visible terminals on the Antigravity IDE bridge, which
+        # preflight now probes (test_reliability covers that check); whether the IDE is running
+        # must not decide a test about agent probes, so the run is pinned as not visible.
         with patch.dict("orchestrator.preflight.AGENT_EXECUTABLE_RESOLVERS", resolvers, clear=True):
-            report = run_preflight(config)
+            report = run_preflight(config, visible_terminals=False)
         self.assertTrue(report["ok"])
         self.assertEqual(len(report["probes"]), len(config["agents"]))
 
@@ -523,7 +526,8 @@ class TestPreflight(unittest.TestCase):
             {"antigravity": lambda: "a", "claude": lambda: "c", "opencode": lambda: "o"},
             clear=True,
         ):
-            report = run_preflight(config)
+            # Not visible: see test_report_aggregates_every_configured_agent.
+            report = run_preflight(config, visible_terminals=False)
         text = format_preflight_report(report, color=False)
         self.assertIn("PREFLIGHT", text)
         self.assertIn("passed", text)

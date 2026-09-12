@@ -6,7 +6,11 @@ import shutil
 import subprocess
 from typing import Optional, List, Dict, Any, Tuple
 
-from orchestrator.agents.exceptions import CLIExecutionError, CLITimeoutError, CLIParsingError
+from orchestrator.agents.exceptions import (
+    CLIExecutionError,
+    CLIParsingError,
+    NativeTUIUnavailableError,
+)
 from orchestrator.launcher import run_agent_cli
 from orchestrator.types import TokenUsage, create_token_usage, unavailable_token_usage
 
@@ -87,11 +91,17 @@ def run_antigravity_raw(
     pause_on_completion: float = 1.5,
     tracer: Optional[Any] = None,
     agent_execution_mode: str = "auto",
+    close_on_completion: bool = True,
 ) -> Dict[str, Any]:
-    """Execute Antigravity CLI and return the parsed JSON payload."""
+    """Execute Antigravity CLI and return the parsed JSON payload.
+
+    Always headless (`agy -p --output-format json`), optionally shown in a visible terminal:
+    `agy` exposes no server, session API or attach mechanism through which a running
+    interactive session could be driven, so `native_tui` is refused rather than faked.
+    """
     exec_mode_str = (agent_execution_mode or "auto").strip().lower()
     if exec_mode_str == "native_tui":
-        raise CLIExecutionError(
+        raise NativeTUIUnavailableError(
             "Antigravity CLI (AGY) does not expose an official programmatic TUI control bridge. "
             "Use agent_execution_mode: auto or headless."
         )
@@ -117,47 +127,76 @@ def run_antigravity_raw(
         terminal_type=terminal_type,
         pause_on_completion=pause_on_completion,
         tracer=tracer,
+        close_on_completion=close_on_completion,
     )
 
     if exec_result.returncode != 0:
+        # A failed run still prints its JSON payload, usage included (measured on agy 1.2.1:
+        # exit 1, `status: ERROR`, an `error` string and a `usage` block). What was reported is
+        # kept with the failure rather than dropped with it.
+        failed = _parse_payload(exec_result.stdout)
         raise CLIExecutionError(
-            message=f"Antigravity CLI execution failed with code {exec_result.returncode}",
+            message=_failure_message(
+                f"Antigravity CLI execution failed with code {exec_result.returncode}", failed
+            ),
             returncode=exec_result.returncode,
             stdout=exec_result.stdout,
             stderr=exec_result.stderr,
             command=cmd,
+            token_usage=_reported_usage(failed),
         )
 
-    raw_stdout = exec_result.stdout.strip()
-    payload = None
-    try:
-        payload = json.loads(raw_stdout)
-    except json.JSONDecodeError as exc:
-        import re
-        match = re.search(r'(\{.*\})', raw_stdout, re.DOTALL)
-        if match:
-            try:
-                payload = json.loads(match.group(1))
-            except json.JSONDecodeError:
-                pass
-                
-        if payload is None:
-            raise CLIParsingError(
-                f"Failed to parse Antigravity JSON output: {exc}",
-                raw_output=exec_result.stdout,
-            ) from exc
+    payload = _parse_payload(exec_result.stdout)
+    if payload is None:
+        raise CLIParsingError(
+            "Failed to parse Antigravity JSON output",
+            raw_output=exec_result.stdout,
+        )
 
     status = payload.get("status")
     if status != "SUCCESS":
         raise CLIExecutionError(
-            message=f"Antigravity CLI returned non-success status: {status}",
+            message=_failure_message(f"Antigravity CLI returned non-success status: {status}", payload),
             returncode=exec_result.returncode,
             stdout=exec_result.stdout,
             stderr=exec_result.stderr,
             command=cmd,
+            token_usage=_reported_usage(payload),
         )
 
     return payload
+
+
+def _parse_payload(stdout: str) -> Optional[Dict[str, Any]]:
+    """The CLI's JSON payload, tolerating leading or trailing noise. None when there is none."""
+    raw = (stdout or "").strip()
+    if not raw:
+        return None
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        import re
+
+        match = re.search(r"(\{.*\})", raw, re.DOTALL)
+        if not match:
+            return None
+        try:
+            payload = json.loads(match.group(1))
+        except json.JSONDecodeError:
+            return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _reported_usage(payload: Optional[Dict[str, Any]]) -> Optional[TokenUsage]:
+    usage = parse_antigravity_token_usage(payload or {})
+    return usage if usage.get("available") else None
+
+
+def _failure_message(base: str, payload: Optional[Dict[str, Any]]) -> str:
+    error = (payload or {}).get("error")
+    if isinstance(error, str) and error.strip():
+        return f"{base}: {error.strip().splitlines()[0][:300]}"
+    return base
 
 
 def run_antigravity_with_usage(
@@ -173,6 +212,7 @@ def run_antigravity_with_usage(
     pause_on_completion: float = 1.5,
     tracer: Optional[Any] = None,
     agent_execution_mode: str = "auto",
+    close_on_completion: bool = True,
 ) -> Tuple[str, TokenUsage]:
     """Execute Antigravity CLI and return both response text and structured TokenUsage."""
     payload = run_antigravity_raw(
@@ -188,6 +228,7 @@ def run_antigravity_with_usage(
         pause_on_completion=pause_on_completion,
         tracer=tracer,
         agent_execution_mode=agent_execution_mode,
+        close_on_completion=close_on_completion,
     )
 
     response = payload.get("response")
@@ -215,6 +256,7 @@ def run_antigravity(
     tracer: Optional[Any] = None,
     agent_execution_mode: str = "auto",
     return_usage: bool = False,
+    close_on_completion: bool = True,
 ) -> Any:
     """Execute Antigravity CLI in non-interactive print mode and return response text.
 
@@ -235,6 +277,7 @@ def run_antigravity(
         pause_on_completion=pause_on_completion,
         tracer=tracer,
         agent_execution_mode=agent_execution_mode,
+        close_on_completion=close_on_completion,
     )
     if return_usage:
         return text, usage

@@ -336,6 +336,7 @@ class RunStore:
         next_model: Optional[Any] = None,
         next_agent: Optional[Any] = None,
         backoff_seconds: float = 0.0,
+        token_usage: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Record that one execution failed and is being attempted again.
 
@@ -348,21 +349,25 @@ class RunStore:
         providers: which agent the run fell back *to* is the fact that makes a rescued run
         readable afterwards, and deriving it from the following `agent_result` would only
         work when the fallback succeeded.
+
+        `token_usage` is what the failed attempt reported spending. The same figure is carried
+        on the phase's eventual AgentResult (`attempt_token_usage`), which is what totals read;
+        it is here too so the log shows where each number came from, at the moment it arrived.
         """
-        self._append(
-            EVENT_AGENT_RETRY,
-            {
-                "agent": agent,
-                "role": role,
-                "attempt": attempt,
-                "of": of,
-                "reason": reason,
-                "model": model,
-                "next_model": next_model,
-                "next_agent": next_agent,
-                "backoff_seconds": round(float(backoff_seconds), 2),
-            },
-        )
+        payload: Dict[str, Any] = {
+            "agent": agent,
+            "role": role,
+            "attempt": attempt,
+            "of": of,
+            "reason": reason,
+            "model": model,
+            "next_model": next_model,
+            "next_agent": next_agent,
+            "backoff_seconds": round(float(backoff_seconds), 2),
+        }
+        if token_usage is not None:
+            payload["token_usage"] = dict(token_usage)
+        self._append(EVENT_AGENT_RETRY, payload)
 
     def record_agent_result(self, result: Dict[str, Any]) -> None:
         """Record one AgentResult exactly as the pipeline produced it."""

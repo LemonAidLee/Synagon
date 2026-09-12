@@ -11,10 +11,10 @@ __pycache__/
 dist/
 build/
 
-# Environment variables & secrets
+# Environment variables & secrets (this project reads none, but nothing should ever
+# commit one by accident)
 .env
 .env.*
-!.env.example
 
 # LangGraph runtime & local artifacts
 .langgraph/
@@ -23,6 +23,9 @@ build/
 # Editor / IDE
 .vscode/
 .idea/
+
+# Local tool state unrelated to this project's source
+.impeccable/
 
 # Durable run store (Tier 1 #4) - local run history, not source.
 # Goals, approvals and delivery records live here too, for the same reason.
@@ -43,5 +46,6 @@ node_modules/
 # Local experiment scripts and throwaway artifacts. Kept on disk, out of the
 # repo: an agent reading this project treats anything committed as design.
 scratch/
+demo/scratch/
 *.vsix
 !tools/antigravity_terminal_bridge.vsix

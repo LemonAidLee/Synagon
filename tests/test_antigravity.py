@@ -1,10 +1,13 @@
 """Unit and integration tests for the Antigravity CLI adapter."""
 
+import itertools
 import json
 import os
 import subprocess
 import unittest
 from unittest.mock import patch, MagicMock
+
+from tests.support import FakeProcess
 
 from orchestrator.agents.antigravity import (
     run_antigravity,
@@ -26,10 +29,10 @@ class TestAntigravityAdapter(unittest.TestCase):
         path = get_antigravity_executable_path()
         self.assertTrue(bool(path), "agy executable path should not be empty")
 
-    @patch("subprocess.run")
+    @patch("subprocess.Popen")
     def test_run_antigravity_success_mock(self, mock_run):
         """Test successful parsing of Antigravity JSON output."""
-        mock_run.return_value = MagicMock(
+        mock_run.return_value = FakeProcess(
             returncode=0,
             stdout=json.dumps({
                 "status": "SUCCESS",
@@ -42,10 +45,10 @@ class TestAntigravityAdapter(unittest.TestCase):
         response = run_antigravity("Test prompt")
         self.assertEqual(response, "Here is the research findings.")
 
-    @patch("subprocess.run")
+    @patch("subprocess.Popen")
     def test_run_antigravity_model_flag(self, mock_run):
         """Test that passing model appends --model <name> to agy command."""
-        mock_run.return_value = MagicMock(
+        mock_run.return_value = FakeProcess(
             returncode=0,
             stdout=json.dumps({"status": "SUCCESS", "response": "Model test response"}),
             stderr="",
@@ -57,10 +60,10 @@ class TestAntigravityAdapter(unittest.TestCase):
         model_idx = called_cmd.index("--model")
         self.assertEqual(called_cmd[model_idx + 1], "gemini-3.8-flash-high")
 
-    @patch("subprocess.run")
+    @patch("subprocess.Popen")
     def test_run_antigravity_non_zero_exit_mock(self, mock_run):
         """Test handling of non-zero exit codes from agy."""
-        mock_run.return_value = MagicMock(
+        mock_run.return_value = FakeProcess(
             returncode=1,
             stdout="",
             stderr="Error: connection failed",
@@ -70,19 +73,20 @@ class TestAntigravityAdapter(unittest.TestCase):
             run_antigravity("Test prompt")
         self.assertEqual(ctx.exception.returncode, 1)
 
-    @patch("subprocess.run")
-    def test_run_antigravity_timeout_mock(self, mock_run):
+    @patch("orchestrator.launcher.time.time", side_effect=itertools.count(0, 6))
+    @patch("subprocess.Popen")
+    def test_run_antigravity_timeout_mock(self, mock_run, _clock):
         """Test handling of subprocess timeout."""
-        mock_run.side_effect = subprocess.TimeoutExpired(cmd=["agy"], timeout=10)
+        mock_run.return_value = FakeProcess(times_out=True)
 
         with self.assertRaises(CLITimeoutError) as ctx:
             run_antigravity("Test prompt", timeout=10)
         self.assertEqual(ctx.exception.timeout, 10)
 
-    @patch("subprocess.run")
+    @patch("subprocess.Popen")
     def test_run_antigravity_malformed_json_mock(self, mock_run):
         """Test handling of malformed JSON from agy."""
-        mock_run.return_value = MagicMock(
+        mock_run.return_value = FakeProcess(
             returncode=0,
             stdout="Not valid JSON at all",
             stderr="",
@@ -91,10 +95,10 @@ class TestAntigravityAdapter(unittest.TestCase):
         with self.assertRaises(CLIParsingError):
             run_antigravity("Test prompt")
 
-    @patch("subprocess.run")
+    @patch("subprocess.Popen")
     def test_run_antigravity_non_success_status_mock(self, mock_run):
         """Test handling of JSON response with status != SUCCESS."""
-        mock_run.return_value = MagicMock(
+        mock_run.return_value = FakeProcess(
             returncode=0,
             stdout=json.dumps({
                 "status": "FAILED",

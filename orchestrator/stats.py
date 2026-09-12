@@ -36,6 +36,7 @@ from orchestrator.store import (
     load_run,
 )
 from orchestrator.status import is_successful
+from orchestrator.types import result_tokens_spent, usage_total
 
 #: Below this many observations, a rate is shown but flagged as thin.
 THIN_SAMPLE = 5
@@ -54,16 +55,7 @@ def _mean(values: List[float]) -> Optional[float]:
 
 def _usage_total(result: Dict[str, Any]) -> Optional[int]:
     """Return the tokens an execution reported, or None when it reported none."""
-    usage = result.get("token_usage") or {}
-    if usage.get("available") is not True:
-        return None
-    total = usage.get("total_tokens")
-    if isinstance(total, int):
-        return total
-    inp, out = usage.get("input_tokens"), usage.get("output_tokens")
-    if isinstance(inp, int) and isinstance(out, int):
-        return inp + out
-    return None
+    return usage_total(result.get("token_usage"))
 
 
 def collect_runs(
@@ -109,15 +101,17 @@ def _run_gates(run: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 def _run_tokens(results: List[Dict[str, Any]]) -> Tuple[int, bool]:
-    """Return a run's total reported tokens and whether every execution reported."""
+    """Return a run's total reported tokens and whether every execution reported.
+
+    Failed retry/escalation attempts behind a result are part of what the run cost, so they
+    count here; the per-pairing figures (`_usage_total`) stay with the rung that produced them.
+    """
     total = 0
     complete = bool(results)
     for result in results:
-        value = _usage_total(result)
-        if value is None:
-            complete = False
-            continue
+        value, result_complete = result_tokens_spent(result)
         total += value
+        complete = complete and result_complete
     return total, complete
 
 

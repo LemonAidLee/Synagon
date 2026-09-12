@@ -1,9 +1,12 @@
 """Unit and integration tests for the OpenCode CLI adapter."""
 
+import itertools
 import os
 import subprocess
 import unittest
 from unittest.mock import patch, MagicMock
+
+from tests.support import FakeProcess
 
 from orchestrator.agents.opencode import (
     run_opencode,
@@ -32,10 +35,10 @@ class TestOpenCodeAdapter(unittest.TestCase):
             get_opencode_executable_path()
         self.assertIn("Could not find 'opencode' CLI executable", str(ctx.exception))
 
-    @patch("subprocess.run")
+    @patch("subprocess.Popen")
     def test_run_opencode_success_mock(self, mock_run):
         """Test successful capture of OpenCode response text."""
-        mock_run.return_value = MagicMock(
+        mock_run.return_value = FakeProcess(
             returncode=0,
             stdout="Implemented approved changes across 2 files.\n",
             stderr="",
@@ -44,10 +47,10 @@ class TestOpenCodeAdapter(unittest.TestCase):
         response = run_opencode("Implement the planned architectural fixes")
         self.assertEqual(response, "Implemented approved changes across 2 files.")
 
-    @patch("subprocess.run")
+    @patch("subprocess.Popen")
     def test_run_opencode_command_construction(self, mock_run):
         """Verify command arguments, working directory, and non-shell invocation."""
-        mock_run.return_value = MagicMock(returncode=0, stdout="Success", stderr="")
+        mock_run.return_value = FakeProcess(returncode=0, stdout="Success", stderr="")
 
         test_prompt = "Implement architectural changes"
         test_dir = r"D:\Progmata\Project Beta"
@@ -71,10 +74,10 @@ class TestOpenCodeAdapter(unittest.TestCase):
         self.assertEqual(kwargs_called.get("stdin"), subprocess.DEVNULL)
         self.assertFalse(kwargs_called.get("shell", False))
 
-    @patch("subprocess.run")
+    @patch("subprocess.Popen")
     def test_run_opencode_non_zero_exit_mock(self, mock_run):
         """Test handling of non-zero exit codes with stderr retention."""
-        mock_run.return_value = MagicMock(
+        mock_run.return_value = FakeProcess(
             returncode=1,
             stdout="",
             stderr="Error: provider authentication required",
@@ -85,10 +88,11 @@ class TestOpenCodeAdapter(unittest.TestCase):
         self.assertEqual(ctx.exception.returncode, 1)
         self.assertIn("provider authentication required", ctx.exception.stderr)
 
-    @patch("subprocess.run")
-    def test_run_opencode_timeout_mock(self, mock_run):
+    @patch("orchestrator.launcher.time.time", side_effect=itertools.count(0, 6))
+    @patch("subprocess.Popen")
+    def test_run_opencode_timeout_mock(self, mock_run, _clock):
         """Test handling of subprocess timeout."""
-        mock_run.side_effect = subprocess.TimeoutExpired(cmd=["opencode"], timeout=10)
+        mock_run.return_value = FakeProcess(times_out=True)
 
         with self.assertRaises(CLITimeoutError) as ctx:
             run_opencode("Test prompt", timeout=10)

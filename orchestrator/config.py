@@ -52,6 +52,7 @@ class ExecutionConfig(TypedDict, total=False):
     visible_terminals: bool
     terminal_type: str
     pause_on_completion: float
+    close_terminal_on_completion: bool  # False keeps visible terminals / native TUI sessions open
     agent_execution_mode: str  # "auto", "native_tui", "headless"
     retry: RetryConfig         # what happens when one execution fails
 
@@ -284,6 +285,7 @@ DEFAULT_CONFIG: OrchestratorConfig = {
         "visible_terminals": False,
         "terminal_type": "auto",
         "pause_on_completion": 1.5,
+        "close_terminal_on_completion": True,
         "agent_execution_mode": "auto",
     },
     "skills": {
@@ -425,6 +427,11 @@ DEFAULT_DELIVERY_CONFIG: DeliveryConfig = {
     "directory": ".orchestrator/delivery",
 }
 
+#: The agents this orchestrator has a runner for (`graph.get_runner`, `preflight`'s resolvers).
+#: The model catalog may list more providers; an entry naming one of those cannot run and is
+#: refused by the team editor and by preflight, and never silently run as a different agent.
+RUNNABLE_AGENTS = ("antigravity", "claude", "opencode")
+
 VALID_ISOLATION_MODES = ("auto", "worktree", "none")
 VALID_CONSENSUS_POLICIES = ("unanimous", "majority", "any")
 
@@ -541,7 +548,10 @@ def validate_config(raw_data: Any) -> OrchestratorConfig:
                         f"agents[{idx}].agent[{a_idx}] must be a non-empty agent name."
                     )
                 agent_ladder.append(str(entry).strip())
-            agent_value: Any = agent_ladder
+            # A one-entry list is just a scalar spelled as a list - ladder_rungs treats
+            # them identically - so collapsing here keeps the length check below from
+            # refusing a config that would run exactly like `agent: <name>` would.
+            agent_value: Any = agent_ladder[0] if len(agent_ladder) == 1 else agent_ladder
         else:
             agent_value = str(raw_agent).strip()
 
@@ -560,7 +570,12 @@ def validate_config(raw_data: Any) -> OrchestratorConfig:
                         f"agents[{idx}].model[{m_idx}] must be a non-empty model id string."
                     )
                 ladder.append(str(entry).strip())
-            model_value = ladder
+            # Same collapse as above - but only when the agent side is not itself a
+            # ladder, where a single typed-so-far model instead means "one model for
+            # several providers" and the length check two lines down is what should
+            # catch it (mirrors teams.py's normalize_team).
+            collapse = len(ladder) == 1 and not isinstance(agent_value, list)
+            model_value = ladder[0] if collapse else ladder
         elif raw_model:
             model_value = str(raw_model).strip()
         else:
@@ -721,6 +736,7 @@ def validate_config(raw_data: Any) -> OrchestratorConfig:
         "visible_terminals": False,
         "terminal_type": "auto",
         "pause_on_completion": 1.5,
+        "close_terminal_on_completion": True,
         "retry": dict(DEFAULT_RETRY_CONFIG),
     }
     if raw_exec is not None:
@@ -758,6 +774,14 @@ def validate_config(raw_data: Any) -> OrchestratorConfig:
                     "Configuration 'execution.pause_on_completion' must be a non-negative number."
                 )
             validated_execution["pause_on_completion"] = float(pause)
+
+        if "close_terminal_on_completion" in raw_exec:
+            close_value = raw_exec["close_terminal_on_completion"]
+            if not isinstance(close_value, bool):
+                raise ConfigValidationError(
+                    "Configuration 'execution.close_terminal_on_completion' must be true or false."
+                )
+            validated_execution["close_terminal_on_completion"] = close_value
 
         if "agent_execution_mode" in raw_exec:
             mode = str(raw_exec["agent_execution_mode"]).strip().lower()
@@ -1023,6 +1047,16 @@ def validate_config(raw_data: Any) -> OrchestratorConfig:
             agent_name = str(raw_planning["agent"]).strip()
             if not agent_name:
                 raise ConfigValidationError("Configuration 'planning.agent' must be a non-empty string.")
+            if agent_name not in validated_models:
+                known = "\n".join(f"  - {name}" for name in sorted(validated_models))
+                raise ConfigValidationError(
+                    f"\nConfiguration Error\n\n"
+                    f"planning.agent names the agent '{agent_name}', which is not a "
+                    f"provider in the model catalog.\n\n"
+                    f"Known agents:\n{known}\n\n"
+                    f"Check the spelling, or add '{agent_name}' to the 'models' catalog in "
+                    f"orchestrator.yaml."
+                )
             validated_planning["agent"] = agent_name
 
         if "model" in raw_planning and raw_planning["model"] is not None:
@@ -1270,7 +1304,9 @@ def get_agent_config(
     """
     for entry in config.get("agents", []):
         role_match = (role is None) or (entry.get("role") == role)
-        agent_match = (agent is None) or (entry.get("agent") == agent)
+        agent_match = (agent is None) or any(
+            rung_agent == agent for rung_agent, _model in ladder_rungs(entry)
+        )
         if role_match and agent_match:
             return entry
     return None
@@ -1386,6 +1422,7 @@ def get_execution_config(config: Optional[OrchestratorConfig]) -> ExecutionConfi
             "visible_terminals": False,
             "terminal_type": "auto",
             "pause_on_completion": 1.5,
+            "close_terminal_on_completion": True,
             "agent_execution_mode": "auto",
             "retry": dict(DEFAULT_RETRY_CONFIG),
         }
@@ -1394,6 +1431,7 @@ def get_execution_config(config: Optional[OrchestratorConfig]) -> ExecutionConfi
         "visible_terminals": bool(exec_cfg.get("visible_terminals", False)),
         "terminal_type": str(exec_cfg.get("terminal_type", "auto")),
         "pause_on_completion": float(exec_cfg.get("pause_on_completion", 1.5)),
+        "close_terminal_on_completion": exec_cfg.get("close_terminal_on_completion", True) is not False,
         "agent_execution_mode": str(exec_cfg.get("agent_execution_mode", "auto")),
         "retry": get_retry_config(config),
     }

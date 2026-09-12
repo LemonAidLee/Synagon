@@ -1391,7 +1391,7 @@ class TestOpencodeNativeTuiWithoutBridge(unittest.TestCase):
         from orchestrator.agents.opencode_tui import run_opencode_native_tui
         from orchestrator.terminals import CapturedResult
 
-        def fake_run_captured(cmd, cwd=None, timeout=180, sink=None, env=None):
+        def fake_run_captured(cmd, cwd=None, timeout=180, sink=None, env=None, stop=None):
             if sink is not None:
                 sink("(a real interactive opencode TUI would render here)\n")
             return CapturedResult(returncode=0, stdout="", stderr="", duration_seconds=0.1)

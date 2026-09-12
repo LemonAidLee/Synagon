@@ -7,7 +7,7 @@ Key Concepts:
 - State: The shared LangGraph working memory during a workflow execution.
 """
 
-from typing import Optional, List, Dict, Any, TypedDict
+from typing import Optional, List, Dict, Any, Tuple, TypedDict
 
 from orchestrator.skills.types import SkillInfo
 
@@ -125,6 +125,55 @@ class AgentResult(TypedDict, total=False):
     execution_mode: Optional[str]  # e.g. "native_tui" or "headless" (Stage 7.5.2)
     attempts: Optional[int]  # How many executions this one result took; 1 when it worked first
     attempt_failures: Optional[List[str]]  # Why each earlier attempt failed, oldest first
+    # What each earlier, failed attempt reported spending, attributed to the rung that spent it:
+    # [{"attempt", "agent", "model", "duration_seconds", "token_usage"}], oldest first.
+    attempt_token_usage: Optional[List[Dict[str, Any]]]
+
+
+def usage_total(usage: Optional[Dict[str, Any]]) -> Optional[int]:
+    """The total one TokenUsage reported, or None when it reported nothing usable.
+
+    The one reading of a TokenUsage every sum in the project goes through, so a display, a
+    budget and a stats report cannot disagree about what one execution cost.
+    """
+    if not isinstance(usage, dict) or usage.get("available") is not True:
+        return None
+    total = usage.get("total_tokens")
+    if isinstance(total, int):
+        return total
+    inp, out = usage.get("input_tokens"), usage.get("output_tokens")
+    if isinstance(inp, int) and isinstance(out, int):
+        return inp + out
+    return None
+
+
+def result_token_rows(result: Dict[str, Any]) -> List[Tuple[Optional[Dict[str, Any]], Optional[int]]]:
+    """Every separately-reported spend behind one AgentResult: failed attempts, then the result.
+
+    Returns ``(attempt_record_or_None, total_or_None)`` pairs. The result's own usage is the last
+    row, with ``None`` in the first slot. A retry is not an ensemble - there is still one result
+    per phase - but a failed attempt that reported usage *spent* it, and dropping it would make
+    every total and every budget decision quietly lower than what was actually paid.
+    """
+    rows: List[Tuple[Optional[Dict[str, Any]], Optional[int]]] = []
+    for attempt in result.get("attempt_token_usage") or []:
+        if isinstance(attempt, dict):
+            rows.append((attempt, usage_total(attempt.get("token_usage"))))
+    rows.append((None, usage_total(result.get("token_usage"))))
+    return rows
+
+
+def result_tokens_spent(result: Dict[str, Any]) -> Tuple[int, bool]:
+    """Known tokens behind one AgentResult, including its failed attempts, and whether all
+    of it was reported. Unreported spend contributes zero and makes the answer incomplete."""
+    known = 0
+    complete = True
+    for _attempt, total in result_token_rows(result):
+        if total is None:
+            complete = False
+        else:
+            known += total
+    return known, complete
 
 
 class VerificationRecord(TypedDict, total=False):
@@ -151,6 +200,7 @@ def create_agent_result(
     execution_mode: Optional[str] = None,
     attempts: Optional[int] = None,
     attempt_failures: Optional[List[str]] = None,
+    attempt_token_usage: Optional[List[Dict[str, Any]]] = None,
 ) -> AgentResult:
     """Helper to construct a validated AgentResult dictionary.
 
@@ -170,6 +220,8 @@ def create_agent_result(
             both count results.
         attempt_failures: Why each earlier attempt failed, oldest first, so "it was flaky" and
             "it is broken" stay distinguishable after the run.
+        attempt_token_usage: What each earlier, failed attempt reported spending, attributed to
+            the agent and model that spent it. Counted by every total and budget, never lost.
 
     Returns:
         A structured AgentResult TypedDict instance.
@@ -195,6 +247,8 @@ def create_agent_result(
         res["attempts"] = attempts
     if attempt_failures:
         res["attempt_failures"] = list(attempt_failures)
+    if attempt_token_usage:
+        res["attempt_token_usage"] = [dict(a) for a in attempt_token_usage]
     return res
 
 

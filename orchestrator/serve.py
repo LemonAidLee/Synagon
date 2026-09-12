@@ -402,6 +402,21 @@ def deliver_card_by_id(
     return {"ok": not refused, "delivery": record, "report": "\n".join(lines).strip()}
 
 
+def reload_config(project_root: str, config_path: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Re-read the configuration file the team editor writes, or None if it will not load.
+
+    The file is the single source of truth (ARCHITECTURE.md §5); a long-lived server only ever
+    holds a copy of it, and after a write that copy is stale.
+    """
+    from orchestrator.config import load_config
+    from orchestrator.teams import config_file_path
+
+    try:
+        return load_config(str(config_file_path(project_root, config_path)))
+    except Exception:
+        return None
+
+
 def make_handler(
     project_root: str,
     config: Any,
@@ -576,6 +591,7 @@ def make_handler(
             refuses a team that would not produce a loadable configuration. What it never
             touches is a run: no route here can start work or answer a gate.
             """
+            nonlocal config
             route = urlparse(self.path).path
 
             if route.startswith("/api/review/"):
@@ -635,6 +651,16 @@ def make_handler(
                 return
 
             result = write_team(project_root, team, config_path=config_path)
+            if result.get("ok"):
+                # The file just changed underneath this server. Every later read (the team, the
+                # catalog, the board) and every later validation must see what was written, not
+                # the configuration the server started with. Without this a saved assignment was
+                # on disk, but the editor re-read the old one and looked as if the save had not
+                # happened - until a restart (Package C).
+                reloaded = reload_config(project_root, config_path)
+                if reloaded is not None:
+                    config = reloaded
+                result["reloaded"] = reloaded is not None
             if on_team_saved:
                 try:
                     on_team_saved(result)

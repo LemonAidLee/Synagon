@@ -1,7 +1,13 @@
 """Metrics aggregation and formatting module for orchestration token accounting and execution stats."""
 
 from typing import Any, Dict, List, Optional, Set, TypedDict
-from orchestrator.types import AgentResult, TokenUsage, VerificationRecord, SkillInfo
+from orchestrator.types import (
+    AgentResult,
+    SkillInfo,
+    TokenUsage,
+    VerificationRecord,
+    result_token_rows,
+)
 
 
 class OrchestrationMetrics(TypedDict, total=False):
@@ -17,6 +23,9 @@ class OrchestrationMetrics(TypedDict, total=False):
     verification_passes: int
     verification_failures: int
     all_tokens_available: bool
+    failed_attempts: int                              # retried/escalated attempts behind the results
+    failed_attempt_tokens: int                        # known tokens those attempts reported
+    failed_attempts_with_unavailable_tokens: int
 
 
 def format_token_count(tokens: Optional[int], available: bool = True) -> str:
@@ -44,6 +53,9 @@ def aggregate_metrics(
     - Never guess, extrapolate, or estimate missing tokens.
     - Only sum tokens where available is True and value is an int.
     - Track executions with unavailable tokens explicitly.
+    - A failed retry/escalation attempt that reported usage spent it: its tokens are part of
+      the total, attributed to the attempt (never to the rung that later succeeded), and an
+      attempt whose usage is unknown makes the total incomplete exactly as a result would.
 
     Args:
         agent_results: Complete list of AgentResult records from workflow state.
@@ -61,8 +73,26 @@ def aggregate_metrics(
     repair_count = 0
     ver_passes = 0
     ver_failures = 0
+    failed_attempts = 0
+    failed_attempt_tokens = 0
+    failed_attempts_unavailable = 0
 
     for res in agent_results:
+        for attempt, attempt_total in result_token_rows(res)[:-1]:
+            failed_attempts += 1
+            total_duration += float((attempt or {}).get("duration_seconds") or 0.0)
+            if attempt_total is None:
+                failed_attempts_unavailable += 1
+            else:
+                failed_attempt_tokens += attempt_total
+                known_total += attempt_total
+            usage = (attempt or {}).get("token_usage") or {}
+            if usage.get("available") is True:
+                if isinstance(usage.get("input_tokens"), int):
+                    known_input += usage["input_tokens"]
+                if isinstance(usage.get("output_tokens"), int):
+                    known_output += usage["output_tokens"]
+
         # Sum duration
         duration = res.get("duration_seconds") or 0.0
         total_duration += duration
@@ -105,7 +135,11 @@ def aggregate_metrics(
         ver_failures = sum(1 for v in verification_history if v.get("verdict") in ("FAIL", "UNKNOWN"))
 
     total_executions = len(agent_results)
-    all_available = (total_executions > 0 and executions_with_unavailable == 0)
+    all_available = (
+        total_executions > 0
+        and executions_with_unavailable == 0
+        and failed_attempts_unavailable == 0
+    )
 
     return {
         "total_duration_seconds": round(total_duration, 2),
@@ -119,6 +153,9 @@ def aggregate_metrics(
         "verification_passes": ver_passes,
         "verification_failures": ver_failures,
         "all_tokens_available": all_available,
+        "failed_attempts": failed_attempts,
+        "failed_attempt_tokens": failed_attempt_tokens,
+        "failed_attempts_with_unavailable_tokens": failed_attempts_unavailable,
     }
 
 
@@ -131,17 +168,20 @@ def get_token_diagnostics(agent_results: List[AgentResult]) -> List[Dict[str, An
 
     diagnostics: List[Dict[str, Any]] = []
     for res in agent_results:
-        agent = res.get("agent", "unknown")
         role = res.get("role", "unknown")
         mode = res.get("execution_mode", "unknown")
-        usage = res.get("token_usage") or {}
-        diag = create_token_diagnostics(
-            agent=agent,
-            role=role,
-            execution_mode=mode,
-            token_usage=usage,
-        )
-        diagnostics.append(diag)
+        for attempt, _total in result_token_rows(res):
+            source = attempt if attempt is not None else res
+            diag = create_token_diagnostics(
+                agent=source.get("agent", "unknown"),
+                role=role,
+                execution_mode=mode,
+                token_usage=source.get("token_usage") or {},
+            )
+            if attempt is not None:
+                diag["failed_attempt"] = attempt.get("attempt")
+                diag["model"] = attempt.get("model")
+            diagnostics.append(diag)
     return diagnostics
 
 
@@ -154,16 +194,12 @@ def verify_token_aggregation_invariant(agent_results: List[AgentResult]) -> Dict
         Dict with 'is_valid', 'sum_displayed', 'reported_total', and 'difference'.
     """
     metrics = aggregate_metrics(agent_results)
+    # Summed from the rows `format_summary_table` draws - failed attempts included, each on its
+    # own row - so "the rows add up to the total" is checked against what a person reads.
     displayed_sum = 0
-    for res in agent_results:
-        usage = res.get("token_usage")
-        if usage and usage.get("available") is True:
-            tot = usage.get("total_tokens")
-            if tot is None:
-                inp = usage.get("input_tokens") or 0
-                out = usage.get("output_tokens") or 0
-                tot = inp + out
-            displayed_sum += tot
+    for row in summary_rows(agent_results):
+        if row["tokens"] is not None:
+            displayed_sum += row["tokens"]
 
     reported_total = metrics["known_total_tokens"]
     diff = reported_total - displayed_sum
@@ -219,6 +255,58 @@ def format_skills_summary(
     return "\n".join(lines)
 
 
+def _agent_display(agent_raw: str) -> str:
+    names = {"antigravity": "Antigravity", "claude": "Claude", "opencode": "OpenCode"}
+    return names.get(str(agent_raw).lower(), str(agent_raw).capitalize())
+
+
+def _execution_label(agent_raw: str, role_raw: str, rep_att: Optional[int]) -> str:
+    agent_disp = _agent_display(agent_raw)
+    if role_raw == "researcher":
+        return f"{agent_disp} Researcher"
+    if role_raw == "planner":
+        return f"{agent_disp} Planner"
+    if role_raw == "implementer":
+        if rep_att is not None and rep_att > 0:
+            return f"{agent_disp} Repair #{rep_att}"
+        return f"{agent_disp} Implementer"
+    if role_raw == "verifier":
+        if rep_att is not None and rep_att > 0:
+            return f"{agent_disp} Reverifier #{rep_att + 1}"
+        return f"{agent_disp} Verifier"
+    return f"{agent_disp} ({role_raw})"
+
+
+def summary_rows(agent_results: List[AgentResult]) -> List[Dict[str, Any]]:
+    """The rows of the final summary table: ``{label, duration_seconds, tokens}``.
+
+    One row per AgentResult, preceded by one row per failed attempt behind it, each labelled
+    with the agent that actually made that attempt. `tokens` is None when unreported.
+    """
+    rows: List[Dict[str, Any]] = []
+    for res in agent_results:
+        role_raw = res.get("role", "role")
+        rep_att = res.get("repair_attempt")
+        for attempt, total in result_token_rows(res):
+            if attempt is None:
+                label = _execution_label(res.get("agent", "agent"), role_raw, rep_att)
+                duration = res.get("duration_seconds", 0.0) or 0.0
+            else:
+                base = _execution_label(attempt.get("agent") or "agent", role_raw, rep_att)
+                # An attempt the process was killed during, recovered on resume from its
+                # `agent_retry` event, is labelled as such rather than as this session's try.
+                # One the process died *during* never reported anything: its row reads
+                # "unavailable", and the label says why rather than implying it failed.
+                if attempt.get("in_flight"):
+                    when = "stopped mid-run, before resume"
+                else:
+                    when = "before resume" if attempt.get("interrupted") else "failed"
+                label = f"{base} (try {attempt.get('attempt')}, {when})"
+                duration = attempt.get("duration_seconds", 0.0) or 0.0
+            rows.append({"label": label, "duration_seconds": float(duration), "tokens": total})
+    return rows
+
+
 def format_summary_table(
     agent_results: List[AgentResult],
     verification_verdict: Optional[str] = None,
@@ -247,52 +335,10 @@ def format_summary_table(
         "-" * 54,
     ]
 
-    for idx, res in enumerate(agent_results, 1):
-        agent_raw = res.get("agent", "agent")
-        role_raw = res.get("role", "role")
-        rep_att = res.get("repair_attempt")
-
-        # Human-friendly agent name formatting
-        if agent_raw.lower() == "antigravity":
-            agent_disp = "Antigravity"
-        elif agent_raw.lower() == "claude":
-            agent_disp = "Claude"
-        elif agent_raw.lower() == "opencode":
-            agent_disp = "OpenCode"
-        else:
-            agent_disp = agent_raw.capitalize()
-
-        # Format label based on role and repair attempt
-        if role_raw == "researcher":
-            label = f"{agent_disp} Researcher"
-        elif role_raw == "planner":
-            label = f"{agent_disp} Planner"
-        elif role_raw == "implementer":
-            if rep_att is not None and rep_att > 0:
-                label = f"{agent_disp} Repair #{rep_att}"
-            else:
-                label = f"{agent_disp} Implementer"
-        elif role_raw == "verifier":
-            if rep_att is not None and rep_att > 0:
-                label = f"{agent_disp} Reverifier #{rep_att + 1}"
-            else:
-                label = f"{agent_disp} Verifier"
-        else:
-            label = f"{agent_disp} ({role_raw})"
-
-        duration_str = f"{res.get('duration_seconds', 0.0):.1f}s"
-        usage: Optional[TokenUsage] = res.get("token_usage")
-        if usage and usage.get("available") is True:
-            tokens_val = usage.get("total_tokens")
-            if tokens_val is None:
-                inp = usage.get("input_tokens") or 0
-                out = usage.get("output_tokens") or 0
-                tokens_val = inp + out
-            tokens_str = f"{tokens_val:,}"
-        else:
-            tokens_str = "unavailable"
-
-        lines.append(f"{label:<30} {duration_str:>10} {tokens_str:>12}")
+    for row in summary_rows(agent_results):
+        duration_str = f"{row['duration_seconds']:.1f}s"
+        tokens_str = f"{row['tokens']:,}" if row["tokens"] is not None else "unavailable"
+        lines.append(f"{row['label']:<30} {duration_str:>10} {tokens_str:>12}")
 
     lines.append("-" * 54)
 
@@ -309,6 +355,12 @@ def format_summary_table(
         unavail_count = metrics["executions_with_unavailable_tokens"]
         unavail_str = f"{unavail_count} execution" if unavail_count == 1 else f"{unavail_count} executions"
         lines.append(f"{'Unavailable:':<30} {'':>10} {unavail_str:>12}")
+        failed_unavail = metrics.get("failed_attempts_with_unavailable_tokens") or 0
+        if failed_unavail:
+            # Earlier tries of an execution: ones that failed, and ones the process was stopped
+            # during (resume.orphaned_attempts) - neither reported what it spent.
+            noun = "earlier try" if failed_unavail == 1 else "earlier tries"
+            lines.append(f"{'':<30} {'':>10} {f'{failed_unavail} {noun}':>12}")
 
     lines.append("")
     if verification_verdict:

@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="orchestrator-token" content="__ORCHESTRATOR_TOKEN__">
-    <title>ORCHESTRATOR</title>
+    <title>SYNAGON</title>
     <style>
 :root, body.theme-srcery {
     --bg: #1C1B19;
@@ -161,7 +161,9 @@ body.theme-miasma {
     --ansi-94: #78824b; --ansi-95: #bb7744; --ansi-96: #c9a554; --ansi-97: #d7c483;
 }
 
-    --font: ui-monospace, "Cascadia Code", "JetBrains Mono", "SF Mono", Consolas, "DejaVu Sans Mono", monospace;
+:root {
+    --font: "Cascadia Code", "JetBrains Mono", "SF Mono", Consolas, "DejaVu Sans Mono", "Courier New", monospace;
+    --font-mono: "Cascadia Code", "JetBrains Mono", "SF Mono", Consolas, "DejaVu Sans Mono", "Courier New", monospace;
     
     --sidebar-width: 250px;
     --inspector-width: 300px;
@@ -402,10 +404,33 @@ aside {
     position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
     background: var(--bg); color: var(--green); z-index: 10000;
     display: none; align-items: center; justify-content: center;
-    font-size: 19px; white-space: pre; font-weight: bold;
+    padding: 24px; box-sizing: border-box;
+    overflow: hidden;
+    user-select: none;
 }
 .booting .boot-overlay { display: flex; }
 .booting .app-container { display: none; }
+#boot-text {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: clamp(8px, 1.85vw, 16px);
+    font-variant-ligatures: none;
+    font-feature-settings: "liga" 0, "calt" 0;
+    letter-spacing: 0;
+    line-height: 1.25;
+    font-weight: bold;
+    white-space: pre;
+    text-align: center;
+    max-width: 100%;
+}
+.boot-logo {
+    display: block;
+    font-family: inherit;
+    font-size: inherit;
+    line-height: 1.15;
+    margin-bottom: 6px;
+    letter-spacing: 0;
+}
 
 /* CHOREOGRAPHY HEADER */
 .pipeline-choreography {
@@ -651,6 +676,13 @@ aside {
 }
 .rail-btn:hover { color: var(--text); }
 .rail-btn.active { color: var(--cyan); border-left-color: var(--cyan); background: var(--bg); }
+.rail-btn:focus-visible { outline: 1px solid var(--cyan); outline-offset: -3px; }
+.rail-icon {
+    width: 20px; height: 20px;
+    fill: none; stroke: currentColor; stroke-width: 1.7;
+    stroke-linecap: round; stroke-linejoin: round;
+    pointer-events: none;
+}
 .rail-btn .rail-badge {
     position: absolute; top: 2px; right: 2px;
     color: var(--amber); font-size: 11px; font-weight: bold; line-height: 1;
@@ -668,6 +700,20 @@ body.terminals-hidden .terminals-area, body.terminals-hidden #splitter-terminals
     padding: 6px; margin-bottom: 6px; background: var(--panel);
 }
 .team-role-name { color: var(--cyan); font-weight: bold; font-size: 13px; }
+.team-role-head { display: flex; justify-content: space-between; align-items: center; }
+.team-remove {
+    background: transparent; border: none; color: var(--text-dim); cursor: pointer;
+    font-family: var(--font); font-size: 16px; line-height: 1; padding: 0 2px;
+}
+.team-remove:hover, .team-remove:focus-visible { color: var(--red); }
+.team-add { border-left-color: var(--green); }
+.team-add .team-role-name { color: var(--text); }
+.team-add-btn {
+    width: 100%; margin-top: 4px; background: var(--bg); border: 1px dashed var(--dim);
+    color: var(--text-dim); font-family: var(--font); font-size: 13px; padding: 4px; cursor: pointer;
+}
+.team-add-btn:hover { border-color: var(--green); color: var(--green); }
+.team-dirty { color: var(--amber); font-size: 12px; margin: 2px 0 4px; }
 .team-role-note { color: var(--dim); font-size: 12px; margin-bottom: 4px; }
 .team-pane select, .team-pane input {
     width: 100%; background: var(--bg); border: 1px solid var(--dim); color: var(--text);
@@ -851,7 +897,7 @@ body.terminals-hidden .terminals-area, body.terminals-hidden #splitter-terminals
 </head>
 <body class="booting">
     <!-- SYSTEM BOOT OVERLAY -->
-    <div id="boot-overlay" class="boot-overlay">
+    <div id="boot-overlay" class="boot-overlay" role="status" aria-label="Synagon daemon starting">
         <div id="boot-text"></div>
     </div>
     <!-- SCANLINE OVERLAY -->
@@ -862,7 +908,7 @@ body.terminals-hidden .terminals-area, body.terminals-hidden #splitter-terminals
         
         <!-- HEADER / COMMAND INPUT -->
         <header class="app-header">
-            <div class="header-logo">ORCHESTRATOR</div>
+            <div class="header-logo">SYNAGON</div>
             <div class="goal-input-container" style="flex: 1; position: relative;">
                 <span class="prompt-char" id="goal-prompt" style="color:var(--cyan); font-weight:bold; margin-right:8px;">&rsaquo;</span>
                 <input type="text" id="goal-input" placeholder="" autocomplete="off" style="width: calc(100% - 140px);">
@@ -891,12 +937,22 @@ body.terminals-hidden .terminals-area, body.terminals-hidden #splitter-terminals
         <!-- MIDDLE SECTION (SIDEBAR + MAIN + INSPECTOR) -->
         <div class="app-middle">
             
-            <!-- ACTIVITY RAIL: which of the four panes the sidebar is showing -->
-            <nav class="activity-rail" id="activity-rail">
-                <button class="rail-btn active" data-pane="explorer" title="Explorer">[E]</button>
-                <button class="rail-btn" data-pane="team" title="Team">[T]</button>
-                <button class="rail-btn" data-pane="board" title="Board">[B]</button>
-                <button class="rail-btn" data-pane="terminals" title="Terminals">[$]</button>
+            <!-- ACTIVITY RAIL: which of the four panes the sidebar is showing. Inline SVG, drawn
+                 in currentColor, so the active/hover colours and every theme apply unchanged and
+                 nothing is fetched (the page must work offline). -->
+            <nav class="activity-rail" id="activity-rail" aria-label="Sidebar panels">
+                <button class="rail-btn active" data-pane="explorer" title="Explorer" aria-label="Explorer" aria-pressed="true">
+                    <svg class="rail-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2.5h8.5A1.5 1.5 0 0 1 21 9v9.5a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5z"/><path d="M3 10.5h18"/></svg>
+                </button>
+                <button class="rail-btn" data-pane="team" title="Team" aria-label="Team" aria-pressed="false">
+                    <svg class="rail-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><path d="M15.5 5.2a3 3 0 0 1 0 5.6"/><path d="M17.5 14.3c2 .8 3.5 2.9 3.5 5.7"/></svg>
+                </button>
+                <button class="rail-btn" data-pane="board" title="Board" aria-label="Board" aria-pressed="false">
+                    <svg class="rail-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3" y="4" width="5" height="16" rx="1"/><rect x="9.5" y="4" width="5" height="11" rx="1"/><rect x="16" y="4" width="5" height="7" rx="1"/></svg>
+                </button>
+                <button class="rail-btn" data-pane="terminals" title="Terminals" aria-label="Terminals" aria-pressed="false">
+                    <svg class="rail-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3" y="4" width="18" height="16" rx="1.5"/><path d="M7 9.5l3 2.5-3 2.5"/><path d="M12.5 15H17"/></svg>
+                </button>
             </nav>
 
             <!-- SIDEBAR: EXPLORER, TEAM, BOARD, TERMINALS -->
@@ -1195,6 +1251,16 @@ body.terminals-hidden .terminals-area, body.terminals-hidden #splitter-terminals
         }, 4000);
     }
 
+    // The run's spend is the server's (cockpit.run_tokens: every result and every failed
+    // attempt, read the way the CLI's summary reads them). Adding up cards counted identical
+    // ensemble members once per card; the card sum is only a fallback for an older daemon.
+    // A trailing "+" means some execution reported nothing, so the figure is a floor.
+    function runTokenLabel(cardSum) {
+        const t = state.cockpit && state.cockpit.run_tokens;
+        const known = t ? t.known : cardSum;
+        return `${(known / 1000).toFixed(1)}K${t && !t.complete ? '+' : ''}`;
+    }
+
     // 6. RENDER: PIPELINE
     function renderPipeline() {
         if (!state.cockpit || !state.cockpit.columns) return;
@@ -1239,7 +1305,7 @@ body.terminals-hidden .terminals-area, body.terminals-hidden #splitter-terminals
                 <div style="color:var(--text-dim); display:flex; gap:16px; font-size: 13px;">
                     <span>ELAPSED --:--</span>
                     <span>AGENTS ${activeAgents}/${state.cockpit.columns.length}</span>
-                    <span>TOKENS ${(totalTokens/1000).toFixed(1)}K</span>
+                    <span>TOKENS ${runTokenLabel(totalTokens)}</span>
                 </div>
             `;
             
@@ -1383,7 +1449,16 @@ body.terminals-hidden .terminals-area, body.terminals-hidden #splitter-terminals
             // Footer
             const footer = document.createElement('div');
             footer.className = 'col-footer';
-            footer.innerHTML = `<button class="add-agent-btn">+ ADD AGENT</button>`;
+            footer.innerHTML = `<button class="add-agent-btn" title="Add an agent to the ${col.role} role">+ ADD AGENT</button>`;
+            // This button was drawn with nothing listening to it (Package C). It adds a draft
+            // entry for this column's role to the Team pane - the one editor, writing through
+            // the one route (`/api/team`) - where a person picks its agent and model and saves.
+            footer.querySelector('.add-agent-btn').addEventListener('click', (event) => {
+                event.stopPropagation();
+                addAgentToDraft(col.role);
+                switchPane('team');
+                showToast(`Added a ${col.role} to the team draft - pick its agent and model, then SAVE`, 'info');
+            });
             colEl.appendChild(footer);
 
             DOM.pipelineBoard.appendChild(colEl);
@@ -1503,7 +1578,7 @@ body.terminals-hidden .terminals-area, body.terminals-hidden #splitter-terminals
             col.agents.forEach(a => totalTokens += a.tokens || 0);
         });
         DOM.statusAgents.innerText = `AGENTS ${totalAgents.toString().padStart(2, '0')}`;
-        DOM.statusTokens.innerText = `TOKENS ${(totalTokens / 1000).toFixed(1)}K`;
+        DOM.statusTokens.innerText = `TOKENS ${runTokenLabel(totalTokens)}`;
         
         DOM.statusApprovals = document.getElementById('status-approvals');
         if (DOM.statusApprovals) {
@@ -1689,16 +1764,21 @@ body.terminals-hidden .terminals-area, body.terminals-hidden #splitter-terminals
     }
 
     // 9. FILE VIEWER & SYNTAX
+    // Every pattern the tokenizer uses is compiled once, here, rather than rebuilt from a template
+    // literal for every matched token: that construction is where this file's worst bug lived
+    // (ARCHITECTURE.md §29), and test_tier9 compiles each of these.
+    const keywords = "def|class|import|from|return|if|else|elif|for|in|while|try|except|with|as|pass|break|continue|yield|and|or|not|is|lambda|None|True|False|const|let|var|function|await|async|null|true|false|new|this|typeof|export|default";
+    const types = "Dict|Any|Optional|List|Tuple|Union|Callable|Set|Mapping|Sequence|str|int|bool|float|bytes";
+    const builtins = "print|dict|list|set|len|sum|os|sys|__init__|__enter__|__exit__|self|super|Math|console|document|window";
+    const tokenRegex = new RegExp(`(#.*?$|\\/\\/.*?$|".*?"|'.*?'|\\b(?:${keywords})\\b|\\b(?:${types})\\b|\\b(?:${builtins})\\b|\\b[A-Za-z_][A-Za-z0-9_]*(?=\\()|\\b\\d+\\b)`, 'gm');
+    const keywordRegex = new RegExp(`^(?:${keywords})$`);
+    const typeRegex = new RegExp(`^(?:${types})$`);
+    const builtinRegex = new RegExp(`^(?:${builtins})$`);
+
     function tokenize(code, lang) {
         // Honest, minimal tokenizer
         code = code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-        
-        const keywords = "def|class|import|from|return|if|else|elif|for|in|while|try|except|with|as|pass|break|continue|yield|and|or|not|is|lambda|None|True|False|const|let|var|function|await|async|null|true|false|new|this|typeof|export|default";
-        const types = "Dict|Any|Optional|List|Tuple|Union|Callable|Set|Mapping|Sequence|str|int|bool|float|bytes";
-        const builtins = "print|dict|list|set|len|sum|os|sys|__init__|__enter__|__exit__|self|super|Math|console|document|window";
-        
-        const tokenRegex = new RegExp(`(#.*?$|\\/\\/.*?$|".*?"|'.*?'|\\b(?:${keywords})\\b|\\b(?:${types})\\b|\\b(?:${builtins})\\b|\\b[A-Za-z_][A-Za-z0-9_]*(?=\\()|\\b\\d+\\b)`, 'gm');
-        
+
         code = code.replace(tokenRegex, (match) => {
             if (match.startsWith('#') || match.startsWith('//')) {
                 return `<span class="token-comment">${match}</span>`;
@@ -1709,13 +1789,13 @@ body.terminals-hidden .terminals-area, body.terminals-hidden #splitter-terminals
             if (/^\d+$/.test(match)) {
                 return `<span class="token-number">${match}</span>`;
             }
-            if (new RegExp(`^(${keywords})$`).test(match)) {
+            if (keywordRegex.test(match)) {
                 return `<span class="token-keyword">${match}</span>`;
             }
-            if (new RegExp(`^(${types})$`).test(match)) {
+            if (typeRegex.test(match)) {
                 return `<span class="token-type">${match}</span>`;
             }
-            if (new RegExp(`^(${builtins})$`).test(match)) {
+            if (builtinRegex.test(match)) {
                 return `<span class="token-builtin">${match}</span>`;
             }
             return `<span class="token-function">${match}</span>`;
@@ -1915,8 +1995,11 @@ body.terminals-hidden .terminals-area, body.terminals-hidden #splitter-terminals
         if (!PANE_TITLES[name]) return;
         state.activePane = name;
         document.body.classList.remove('sidebar-hidden');
-        document.querySelectorAll('.rail-btn').forEach(b =>
-            b.classList.toggle('active', b.getAttribute('data-pane') === name));
+        document.querySelectorAll('.rail-btn').forEach(b => {
+            const on = b.getAttribute('data-pane') === name;
+            b.classList.toggle('active', on);
+            b.setAttribute('aria-pressed', on ? 'true' : 'false');
+        });
         document.querySelectorAll('.sidebar-pane').forEach(pane =>
             pane.classList.toggle('active', pane.id === 'side-' + name));
         if (DOM.sidebarTitle) DOM.sidebarTitle.innerText = PANE_TITLES[name];
@@ -1967,6 +2050,16 @@ body.terminals-hidden .terminals-area, body.terminals-hidden #splitter-terminals
         return model || '';
     }
 
+    // `agent.agent` can be an escalation ladder (a list of provider names) rather than a
+    // single provider. This editor only offers one dropdown per role, so it can only ever
+    // show and edit the first rung - this reads that rung the same way modelIdOf reads the
+    // first model of a ladder, instead of coercing the whole array into a lookup key.
+    function agentIdOf(agent) {
+        const raw = agent ? agent.agent : null;
+        if (Array.isArray(raw)) return raw.length ? raw[0] : '';
+        return raw || '';
+    }
+
     function renderTeamPane() {
         if (!DOM.teamPane) return;
         const team = currentTeamDraft();
@@ -1979,23 +2072,44 @@ body.terminals-hidden .terminals-area, body.terminals-hidden #splitter-terminals
         const problems = state.teamProblems.length ? state.teamProblems : ((state.cockpit && state.cockpit.problems) || []);
 
         let html = '';
+        if (teamIsDirty(team)) {
+            html += `<div class="team-dirty">unsaved changes &middot; SAVE writes them to orchestrator.yaml</div>`;
+        }
         team.agents.forEach((agent, index) => {
-            const models = (catalog.models || {})[agent.agent] || [];
+            const agentId = agentIdOf(agent);
+            const isLadder = Array.isArray(agent.agent) && agent.agent.length > 1;
+            const models = (catalog.models || {})[agentId] || [];
             html += `
                 <div class="team-role">
-                    <div class="team-role-name">${(agent.role || '?').toUpperCase()}</div>
-                    <div class="team-role-note">${(catalog.roles || {})[agent.role] || ''}</div>
+                    <div class="team-role-head">
+                        <div class="team-role-name">${(agent.role || '?').toUpperCase()}</div>
+                        <button class="team-remove" data-team-remove="${index}" title="Remove this agent from the team" aria-label="Remove this ${agent.role || ''} agent">&times;</button>
+                    </div>
+                    <div class="team-role-note">${(catalog.roles || {})[agent.role] || ''}${isLadder ? ` &middot; escalates to ${agent.agent.slice(1).join(', ')} (edit orchestrator.yaml to change the ladder)` : ''}</div>
                     <select data-team-field="agent" data-team-index="${index}">
                         ${providers.map(prov =>
-                            `<option value="${prov}" ${prov === agent.agent ? 'selected' : ''}>${prov}</option>`).join('')}
+                            `<option value="${prov}" ${prov === agentId ? 'selected' : ''}>${prov}</option>`).join('')}
                     </select>
                     <select data-team-field="model" data-team-index="${index}">
                         ${models.map(m =>
                             `<option value="${m.id}" ${m.id === modelIdOf(agent) ? 'selected' : ''}>${m.name}</option>`).join('')}
                     </select>
-                    <div class="team-evidence" data-evidence-role="${agent.role || ''}" data-evidence-agent="${agent.agent || ''}" data-evidence-model="${modelIdOf(agent)}"></div>
+                    <div class="team-evidence" data-evidence-role="${agent.role || ''}" data-evidence-agent="${agentId}" data-evidence-model="${modelIdOf(agent)}"></div>
                 </div>`;
         });
+
+        // Any role this project defines can be added; the decomposer is not a pipeline role
+        // (it runs before a pipeline, from `planning:`), so it is the one not offered.
+        const addableRoles = Object.keys(catalog.roles || {}).filter(role => role !== 'decomposer');
+        html += `
+            <div class="team-role team-add">
+                <div class="team-role-name">ADD AGENT</div>
+                <div class="team-role-note">joins its role's phase &middot; pick its agent and model above, then SAVE</div>
+                <select id="team-add-role" aria-label="Role for the new agent">
+                    ${addableRoles.map(role => `<option value="${role}">${role}</option>`).join('')}
+                </select>
+                <button id="team-add-btn" class="team-add-btn">+ ADD AGENT</button>
+            </div>`;
 
         html += `
             <div class="team-role">
@@ -2030,7 +2144,14 @@ body.terminals-hidden .terminals-area, body.terminals-hidden #splitter-terminals
                 const agent = team.agents[index];
                 if (!agent) return;
                 if (field === 'agent') {
-                    agent.agent = el.value;
+                    // Only rung 0 is ever offered in this dropdown, so only rung 0 is
+                    // replaced - overwriting the whole field would silently discard any
+                    // escalation rungs configured beyond it (see agentIdOf).
+                    if (Array.isArray(agent.agent)) {
+                        agent.agent = [el.value, ...agent.agent.slice(1)];
+                    } else {
+                        agent.agent = el.value;
+                    }
                     const first = ((catalog.models || {})[el.value] || [])[0];
                     agent.model = first ? first.id : '';
                     renderTeamPane();
@@ -2039,6 +2160,19 @@ body.terminals-hidden .terminals-area, body.terminals-hidden #splitter-terminals
                     renderTeamEvidence();
                 }
             });
+        });
+
+        DOM.teamPane.querySelectorAll('[data-team-remove]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                team.agents.splice(parseInt(btn.getAttribute('data-team-remove'), 10), 1);
+                state.teamProblems = [];
+                renderTeamPane();
+            });
+        });
+        const addBtn = document.getElementById('team-add-btn');
+        if (addBtn) addBtn.addEventListener('click', () => {
+            const picker = document.getElementById('team-add-role');
+            addAgentToDraft(picker ? picker.value : '');
         });
 
         const save = document.getElementById('team-save');
@@ -2052,6 +2186,50 @@ body.terminals-hidden .terminals-area, body.terminals-hidden #splitter-terminals
         renderTeamEvidence();
     }
 
+    // The saved team, in the shape a draft is compared against: what SAVE would change.
+    function teamEssentials(team) {
+        return JSON.stringify({
+            agents: (team && team.agents || []).map(a => ({ agent: a.agent, model: a.model || null, role: a.role })),
+            consensus: team && team.consensus,
+            max_repair_attempts: team && team.max_repair_attempts
+        });
+    }
+
+    function teamIsDirty(team) {
+        const saved = state.cockpit && state.cockpit.team;
+        return !!(saved && team) && teamEssentials(team) !== teamEssentials(saved);
+    }
+
+    // A new agent goes beside the last agent already holding its role, so it joins that phase
+    // (an ensemble of researchers, a quorum of verifiers). A role nobody holds yet goes to its
+    // place in the order `roles:` lists them - read from the project's own config, not assumed
+    // here. Whether the result is a team that can run is the server's decision on SAVE
+    // (`teams.validate_team`); nothing here pre-empts it or picks an assignment for anyone.
+    function addAgentToDraft(role) {
+        const team = currentTeamDraft();
+        if (!team || !role) return;
+        if (!Array.isArray(team.agents)) team.agents = [];
+        const catalog = (state.cockpit && state.cockpit.catalog) || { models: {}, roles: {} };
+        const provider = Object.keys(catalog.models || {})[0] || '';
+        const first = ((catalog.models || {})[provider] || [])[0];
+        const entry = { agent: provider, model: first ? first.id : null, role: role };
+
+        let at = -1;
+        team.agents.forEach((a, i) => { if (a.role === role) at = i + 1; });
+        if (at < 0) {
+            const order = Object.keys(catalog.roles || {});
+            const rank = order.indexOf(role);
+            at = team.agents.length;
+            if (rank >= 0) {
+                const later = team.agents.findIndex(a => order.indexOf(a.role) > rank);
+                if (later >= 0) at = later;
+            }
+        }
+        team.agents.splice(at, 0, entry);
+        state.teamProblems = [];
+        renderTeamPane();
+    }
+
     async function saveTeam() {
         const team = currentTeamDraft();
         if (!team) return;
@@ -2063,8 +2241,15 @@ body.terminals-hidden .terminals-area, body.terminals-hidden #splitter-terminals
             });
             if (result.ok) {
                 state.teamProblems = [];
-                showToast('Team saved', 'success');
-                fetchCockpit();
+                // Re-read what was saved rather than keep showing the draft: the pane and the
+                // pipeline then show what the daemon will actually run next.
+                state.teamDraft = null;
+                showToast(result.unchanged ? 'Team unchanged' : 'Team saved to orchestrator.yaml', 'success');
+                if (result.reloaded === false) {
+                    showToast('Saved, but the daemon could not re-read the file - restart it', 'error');
+                }
+                await fetchCockpit();
+                if (state.activePane !== 'team') renderTeamPane();
             } else {
                 state.teamProblems = (result.problems && result.problems.length)
                     ? result.problems : [result.error || 'the team was not saved'];
@@ -2486,7 +2671,22 @@ body.terminals-hidden .terminals-area, body.terminals-hidden #splitter-terminals
         if (!board) return;
         const waiting = (state.cockpit && state.cockpit.needs_you ? state.cockpit.needs_you.length : 0)
             + (state.cockpit && state.cockpit.approvals ? state.cockpit.approvals.length : 0);
-        board.innerHTML = '[B]' + (waiting ? `<span class="rail-badge">${waiting}</span>` : '');
+        // The badge is added or removed beside the icon; rewriting the button would erase it.
+        let badge = board.querySelector('.rail-badge');
+        if (waiting) {
+            if (!badge) {
+                badge = document.createElement('span');
+                badge.className = 'rail-badge';
+                badge.setAttribute('aria-hidden', 'true');
+                board.appendChild(badge);
+            }
+            badge.textContent = String(waiting);
+        } else if (badge) {
+            badge.remove();
+        }
+        const label = waiting ? `Board (${waiting} waiting on you)` : 'Board';
+        board.setAttribute('aria-label', label);
+        board.setAttribute('title', label);
     }
 
     // BOOT SEQUENCE
@@ -2516,8 +2716,18 @@ body.terminals-hidden .terminals-area, body.terminals-hidden #splitter-terminals
 
         const bootText = document.getElementById('boot-text');
         if (bootText && !prefersReducedMotion) {
+            const SYNAGON_LOGO = [
+                " █████   ██   ██  ██   ██    ███     █████    █████   ██   ██",
+                "██   ██  ██   ██  ███  ██   ██ ██   ██   ██  ██   ██  ███  ██",
+                "██        ██ ██   ████ ██  ██   ██  ██       ██   ██  ████ ██",
+                " █████     ███    ██ █ ██  ███████  ██  ███  ██   ██  ██ █ ██",
+                "     ██    ███    ██ ████  ██   ██  ██   ██  ██   ██  ██ ████",
+                "██   ██    ███    ██  ███  ██   ██  ██   ██  ██   ██  ██  ███",
+                " █████     ███    ██   ██  ██   ██   █████    █████   ██   ██",
+            ].join("\n");
             const steps = [
-                "ORCHESTRATOR\n────────────────────────────\n",
+                `<span class="boot-logo" aria-hidden="true">${SYNAGON_LOGO}</span>\n` +
+                    "─".repeat(61) + "\n",
                 "INITIALIZING DAEMON ........ ",
                 "OK\nLOADING PROJECT ............ ",
                 "OK\nCONNECTING STREAM .......... ",
@@ -2527,7 +2737,7 @@ body.terminals-hidden .terminals-area, body.terminals-hidden #splitter-terminals
             let current = "";
             for (let i = 0; i < steps.length; i++) {
                 current += steps[i];
-                bootText.innerText = current;
+                bootText.innerHTML = current;
                 await new Promise(r => setTimeout(r, i === 0 ? 100 : 80));
             }
             await new Promise(r => setTimeout(r, 100));

@@ -27,10 +27,16 @@ Load-bearing rules
 import time
 from typing import Any, Dict, List, Optional, TypedDict
 
+from orchestrator.types import result_token_rows, result_tokens_spent
+
 
 class BudgetState(TypedDict, total=False):
     """What a run has spent, against what it is allowed to spend."""
     tokens_spent: int
+    # False when any execution or attempt never reported its usage: `tokens_spent` is then a
+    # floor, never an estimate, and is displayed as one.
+    tokens_complete: bool
+    unreported_executions: int
     max_total_tokens: int
     seconds_elapsed: float
     max_duration_seconds: int
@@ -42,37 +48,42 @@ def tokens_spent(agent_results: Optional[List[Dict[str, Any]]]) -> int:
     """Sum the tokens every execution actually reported.
 
     Mirrors `orchestrator.metrics.aggregate_metrics`: an execution whose usage
-    is unavailable contributes nothing rather than an estimate.
+    is unavailable contributes nothing rather than an estimate, and a failed retry or
+    escalation attempt that reported usage is counted - it was paid for.
     """
-    total = 0
-    for result in agent_results or []:
-        usage = result.get("token_usage") or {}
-        if usage.get("available") is not True:
-            continue
-        value = usage.get("total_tokens")
-        if isinstance(value, int):
-            total += value
-            continue
-        inp = usage.get("input_tokens")
-        out = usage.get("output_tokens")
-        if isinstance(inp, int) and isinstance(out, int):
-            total += inp + out
-    return total
+    return sum(result_tokens_spent(result)[0] for result in agent_results or [])
+
+
+def unreported_executions(agent_results: Optional[List[Dict[str, Any]]]) -> int:
+    """How many executions and attempts never reported their usage (each makes the total a
+    floor). Counted from the same rows every total reads (`types.result_token_rows`)."""
+    return sum(
+        1
+        for result in agent_results or []
+        for _attempt, total in result_token_rows(result)
+        if total is None
+    )
 
 
 def seconds_elapsed(state: Any, now: Optional[float] = None) -> float:
     """Return how long the run has been going.
 
-    Prefers the wall clock from the run's start, because that is what a
-    `max_duration_seconds` ceiling means to a person watching it. Falls back to
-    the sum of execution durations when the start time is absent - for a
-    reconstructed or partial state, that is the only honest number available.
+    Prefers the wall clock from the session's start, because that is what a
+    `max_duration_seconds` ceiling means to a person watching it, plus the time any earlier
+    session of the same run spent working (`prior_elapsed_seconds`, from `resume.active_seconds`)
+    - a resumed run continues its clock rather than starting a new one. Falls back to the sum of
+    execution durations when the start time is absent - for a reconstructed or partial state,
+    that is the only honest number available.
     """
     if not state:
         return 0.0
     started = state.get("run_started_at")
     if isinstance(started, (int, float)) and started > 0:
-        return max(0.0, (time.time() if now is None else float(now)) - float(started))
+        try:
+            prior = max(0.0, float(state.get("prior_elapsed_seconds") or 0.0))
+        except (TypeError, ValueError):
+            prior = 0.0
+        return prior + max(0.0, (time.time() if now is None else float(now)) - float(started))
     return round(
         sum(float(r.get("duration_seconds") or 0.0) for r in state.get("agent_results") or []),
         2,
@@ -111,6 +122,7 @@ def evaluate_budget(
         max_seconds = 0
 
     spent = tokens_spent(state.get("agent_results"))
+    unreported = unreported_executions(state.get("agent_results"))
     elapsed = seconds_elapsed(state, now=now)
 
     reason: Optional[str] = None
@@ -127,6 +139,8 @@ def evaluate_budget(
 
     return {
         "tokens_spent": spent,
+        "tokens_complete": unreported == 0,
+        "unreported_executions": unreported,
         "max_total_tokens": max_tokens,
         "seconds_elapsed": round(elapsed, 2),
         "max_duration_seconds": max_seconds,
@@ -150,6 +164,12 @@ def describe_budget(budget_state: BudgetState) -> str:
     max_seconds = budget_state.get("max_duration_seconds") or 0
 
     token_part = f"{spent:,} tokens" + (f" / {max_tokens:,}" if max_tokens else " (no limit)")
+    unreported = int(budget_state.get("unreported_executions") or 0)
+    if budget_state.get("tokens_complete") is False and unreported:
+        # A floor, said as one: the unreported executions' spend is unknown, not zero.
+        token_part = (
+            f"at least {token_part} ({unreported} execution(s) never reported usage)"
+        )
     time_part = f"{elapsed:.0f}s" + (f" / {max_seconds}s" if max_seconds else " (no limit)")
     line = f"Budget: {token_part}, {time_part}."
     if budget_state.get("reason"):

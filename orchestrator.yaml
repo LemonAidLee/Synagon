@@ -15,29 +15,6 @@
 # Active Agent Assignments
 # ------------------------------------------------------------------------------
 agents:
-  # The researcher was `antigravity / gemini-3.8-flash-high` until 2026-09-08. It was moved
-  # because of measured behaviour, not preference: asked to *investigate a project* - which is
-  # precisely this role's job - the Antigravity CLI returns `status: SUCCESS` with an EMPTY
-  # response string, having spent its whole output budget on thinking tokens. It answers small
-  # prompts fine, so `--doctor` passes and nothing looks wrong until a run dies.
-  #
-  # That single failure was 7 of 7 real end-to-end failures this project ever recorded, and
-  # retrying cannot fix it because it is deterministic, not flaky (6 consecutive attempts, 6
-  # empty replies). On the cleaned run store (`--archive-runs` removed 141 suite artifacts
-  # that were 86% of the dataset), `--stats` puts antigravity/gemini-3.8-flash-high at a 90%
-  # error rate over 10 runs in this role, against 0% for claude/sonnet over 3. The first
-  # number is the evidence; the second is still below the five-observation line `--stats`
-  # flags, and an earlier version of this comment claimed 20 runs for it - that figure came
-  # from the polluted store and was never true.
-  #
-  # To put Antigravity back, make it the first rung of a ladder rather than the only choice:
-  #
-  #   - agent: [antigravity, claude]
-  #     model: [gemini-3.8-flash-high, sonnet]
-  #     role: researcher
-  #
-  # `execution.retry.escalate_model` then steps across providers when the first one returns
-  # nothing, which is the specific failure above (ARCHITECTURE.md §9.2).
   - agent: claude
     model: sonnet
     role: researcher
@@ -50,8 +27,8 @@ agents:
     model: opencode/big-pickle
     role: implementer
 
-  - agent: claude
-    model: sonnet
+  - agent: antigravity
+    model: gemini-3.8-flash-high
     role: verifier
 
 # ------------------------------------------------------------------------------
@@ -66,13 +43,29 @@ max_repair_attempts: 2
 # ------------------------------------------------------------------------------
 # Execution Settings (Stage 7.5)
 # ------------------------------------------------------------------------------
-# Controls process launching, visibility, and execution mode (Stage 7.5.2).
+# Controls process launching, visibility, and execution mode (Stage 7.5.2, 7.5.2.1).
 # visible_terminals: false      # When true, each agent execution runs visibly in its own terminal window.
 # terminal_type: auto           # "auto", "antigravity_integrated", "windows_terminal", or "console"
-# pause_on_completion: 1.5      # Seconds to pause visible window upon completion before closing
-# agent_execution_mode: auto    # "auto" (prefer native TUI where supported, headless fallback),
-#                               # "native_tui" (strictly require native TUI),
-#                               # "headless" (standard non-interactive CLI mode)
+# pause_on_completion: 1.5      # Seconds a finished terminal stays visible before it closes
+# close_terminal_on_completion: true
+#                               # false keeps finished terminals open for inspection: an OpenCode
+#                               # native TUI session keeps its server and TUI (history and all)
+#                               # until `python -m orchestrator --close-sessions` (at most 8 are
+#                               # kept; the oldest is closed first); an integrated tab stays; an
+#                               # OS window waits for Enter. Failed, timed-out and interrupted
+#                               # executions are ALWAYS torn down. One run: --keep-terminals
+# agent_execution_mode: auto    # "auto"       native TUI where a supported integration AND a
+#                               #              surface exist (OpenCode only: the Antigravity
+#                               #              bridge, or the daemon's pty), headless elsewhere
+#                               # "native_tui" require it: refuses any agent without a supported
+#                               #              native TUI (Claude Code, Antigravity) at preflight,
+#                               #              and never falls back to headless
+#                               # "headless"   `claude -p` / `agy -p` / `opencode run`, visible
+#                               #              in a terminal when visible_terminals is on
+#
+# SUPPORTED NATIVE TUI: OpenCode (official `serve` + `attach` client/server API).
+# VISIBLE HEADLESS FALLBACK: Claude Code, Antigravity - their interactive CLIs exist, but they
+# expose no supported way to drive a running interactive session, so they are never faked.
 #
 # SURVIVING A FLAKY AGENT (execution.retry)
 #
@@ -101,6 +94,7 @@ execution:
   visible_terminals: true
   terminal_type: antigravity_integrated
   pause_on_completion: 1.5
+  close_terminal_on_completion: false
   agent_execution_mode: auto
   retry:
     attempts: 3

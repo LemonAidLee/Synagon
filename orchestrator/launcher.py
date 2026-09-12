@@ -244,6 +244,93 @@ def get_terminal_title(
     return f"LangGraph - {agent_display} {role.capitalize()}"
 
 
+#: How often a bounded wait wakes up to check its deadline and let an interruption through.
+_WAIT_SLICE_SECONDS = 0.5
+
+
+def stop_tree(process: subprocess.Popen) -> None:
+    """Stop a child process and everything it started, then reap it. Never raises.
+
+    On Windows a process's children outlive it, and an agent CLI starts children of its own
+    (tools, test runs, language servers). Killing only the direct child left them running, and
+    when one of them still held the inherited stdout pipe, the wait for that pipe did not
+    return until it exited - measured: a 2-second timeout returned after 25 seconds, the
+    lifetime of the grandchild, and the captured path returned on time but left it running.
+
+    A process started by `process_jobs.spawn_owned` is stopped through its job, which ends
+    exactly what that execution started - including a grandchild whose parent has already
+    exited, which a parent-PID walk cannot reach. `taskkill /T` on the PID this process holds a
+    handle to remains the fallback for a process that could not be owned.
+    """
+    from orchestrator.process_jobs import finish_owned, stop_owned
+
+    try:
+        if process.poll() is None:
+            if not stop_owned(process) and sys.platform == "win32":
+                from orchestrator.native_sessions import stop_process_tree
+
+                stop_process_tree(process.pid)
+            process.kill()
+    except Exception:
+        pass
+    try:
+        process.wait(timeout=5.0)
+    except Exception:
+        pass
+    finish_owned(process)
+
+
+def run_bounded(cmd: List[str], cwd: str, timeout: float) -> "tuple[int, str, str]":
+    """Run a command to completion with its output captured, within `timeout`, or not at all.
+
+    Returns ``(returncode, stdout, stderr)``. On a timeout - or on anything else that ends the
+    wait early, a KeyboardInterrupt included - the whole process tree is stopped before the
+    exception propagates, so neither a late return nor an orphan is possible. The wait is taken
+    in short slices so that an interruption is acted on promptly rather than after the child
+    happens to exit.
+
+    Raises:
+        CLITimeoutError: If the command outlives `timeout`.
+    """
+    from orchestrator.agents.exceptions import CLITimeoutError
+    from orchestrator.process_jobs import finish_owned, spawn_owned
+
+    # Owned by a kill-on-close job, so the agent's whole tree ends with this process even when
+    # this process is killed outright and runs none of the cleanup below (process_jobs).
+    process = spawn_owned(
+        cmd,
+        cwd=cwd,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    deadline = time.time() + max(0.0, float(timeout))
+    try:
+        while True:
+            remaining = deadline - time.time()
+            try:
+                stdout, stderr = process.communicate(
+                    timeout=max(0.01, min(_WAIT_SLICE_SECONDS, remaining))
+                )
+                # The agent is done; anything it left running in the background is not its
+                # result, and does not outlive the execution that started it.
+                finish_owned(process)
+                return process.returncode, stdout or "", stderr or ""
+            except subprocess.TimeoutExpired:
+                if time.time() >= deadline:
+                    raise CLITimeoutError(
+                        f"Agent CLI command timed out after {timeout} seconds",
+                        timeout=int(timeout),
+                        command=cmd,
+                    )
+    except BaseException:
+        stop_tree(process)
+        raise
+
+
 def run_agent_cli(
     cmd: List[str],
     cwd: Optional[str] = None,
@@ -256,6 +343,7 @@ def run_agent_cli(
     terminal_type: str = "auto",
     pause_on_completion: float = 1.5,
     tracer: Optional[Any] = None,
+    close_on_completion: bool = True,
 ) -> ExecutionResult:
     """Execute an agent CLI command with optional visible terminal window.
 
@@ -283,6 +371,12 @@ def run_agent_cli(
         terminal_type: Terminal host ('auto', 'windows_terminal', 'console').
         pause_on_completion: Seconds to keep visible terminal open after process finishes.
         tracer: Optional tracer instance for logging lifecycle events.
+        close_on_completion: Visible mode only. True (the default, and the old behaviour for
+            OS windows) closes the terminal after `pause_on_completion`; for an Antigravity
+            integrated tab it is now closed too, where it used to be left behind. False keeps
+            it: an integrated tab simply stays, and a Windows Terminal / console window waits
+            for Enter. The orchestrator never waits on a kept window either way - it continues
+            as soon as the runner has written its result.
 
     Returns:
         ExecutionResult containing returncode, stdout, stderr, duration, command.
@@ -343,28 +437,12 @@ def run_agent_cli(
                 command=cmd,
             )
 
-        try:
-            res = subprocess.run(
-                cmd,
-                cwd=working_dir,
-                stdin=subprocess.DEVNULL,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                timeout=timeout,
-            )
-        except subprocess.TimeoutExpired as exc:
-            raise CLITimeoutError(
-                f"Agent CLI command timed out after {timeout} seconds",
-                timeout=timeout,
-                command=cmd,
-            ) from exc
-
+        returncode, stdout, stderr = run_bounded(cmd, cwd=working_dir, timeout=timeout)
         duration = round(time.time() - t0, 2)
         return ExecutionResult(
-            returncode=res.returncode,
-            stdout=res.stdout,
-            stderr=res.stderr,
+            returncode=returncode,
+            stdout=stdout,
+            stderr=stderr,
             duration_seconds=duration,
             command=cmd,
         )
@@ -390,7 +468,35 @@ def run_agent_cli(
             "status_file": status_file,
             "timeout": timeout,
             "pause_seconds": max(0.0, float(pause_on_completion)),
+            # A runner hosted by Windows Terminal or the IDE bridge is not this process's child,
+            # so no job of ours can own it; it watches this PID instead and stops its agent if
+            # the orchestrator that asked for it is gone (process_jobs.watch_owner).
+            "owner_pid": os.getpid(),
         }
+
+        norm_type = terminal_type.lower()
+        use_integrated = False
+        if norm_type in ("antigravity_integrated", "integrated"):
+            if not check_antigravity_bridge():
+                raise CLIExecutionError(
+                    message=(
+                        "Antigravity IDE Integrated Terminal Bridge is not reachable at "
+                        f"{get_antigravity_bridge_url()}.\n"
+                        "Please ensure Antigravity IDE is running and the bridge extension is active.\n"
+                        "Run 'python tools/install_terminal_bridge.py' to install or verify the bridge."
+                    ),
+                    returncode=1,
+                    command=cmd,
+                )
+            use_integrated = True
+        elif norm_type == "auto":
+            # Auto-detect: prefer integrated Antigravity IDE terminal if bridge is available
+            use_integrated = check_antigravity_bridge()
+
+        # An integrated tab outlives its runner (it is a shell the command was typed into), so
+        # it never needs to hold itself open; an OS window closes when its runner exits, so
+        # keeping one means the runner waits for Enter after writing its result.
+        job_spec["hold_open"] = (not close_on_completion) and not use_integrated
 
         with open(job_file, "w", encoding="utf-8") as f:
             json.dump(job_spec, f, indent=2)
@@ -415,31 +521,12 @@ def run_agent_cli(
         ]
 
         t0 = time.time()
-        norm_type = terminal_type.lower()
-        use_integrated = False
-
-        if norm_type in ("antigravity_integrated", "integrated"):
-            if not check_antigravity_bridge():
-                raise CLIExecutionError(
-                    message=(
-                        "Antigravity IDE Integrated Terminal Bridge is not reachable at "
-                        f"{get_antigravity_bridge_url()}.\n"
-                        "Please ensure Antigravity IDE is running and the bridge extension is active.\n"
-                        "Run 'python tools/install_terminal_bridge.py' to install or verify the bridge."
-                    ),
-                    returncode=1,
-                    command=cmd,
-                )
-            use_integrated = True
-        elif norm_type == "auto":
-            # Auto-detect: prefer integrated Antigravity IDE terminal if bridge is available
-            if check_antigravity_bridge():
-                use_integrated = True
-            else:
-                use_integrated = False
 
         if use_integrated:
-            # Launch via Antigravity Integrated Terminal Bridge
+            # Launch via Antigravity Integrated Terminal Bridge. The bridge closes a tab by
+            # title and closes the *first* match, so the title carries this job's own suffix:
+            # closing this tab must never close an older one that was deliberately kept.
+            tab_title = f"{term_title} [{os.path.basename(tmp_dir)[-6:]}]"
             pythonpath_val = runner_env.get("PYTHONPATH", "")
             runner_cmd_str = (
                 f'$env:PYTHONPATH="{pythonpath_val}"; '
@@ -450,33 +537,50 @@ def run_agent_cli(
                 "PYTHONIOENCODING": "utf-8",
             }
 
-            launch_antigravity_integrated_terminal(
-                title=term_title,
+            if not launch_antigravity_integrated_terminal(
+                title=tab_title,
                 cwd=working_dir,
                 command=runner_cmd_str,
                 env=bridge_env,
-            )
-
-            # Wait for status file completion
-            deadline = time.time() + timeout + pause_on_completion + 30
-            status_data: Optional[Dict[str, Any]] = None
-
-            while time.time() < deadline:
-                if os.path.isfile(status_file):
-                    try:
-                        with open(status_file, "r", encoding="utf-8") as sf:
-                            status_data = json.load(sf)
-                        break
-                    except (json.JSONDecodeError, PermissionError):
-                        time.sleep(0.1)
-                time.sleep(0.2)
-
-            if not status_data:
-                raise CLITimeoutError(
-                    f"Integrated agent terminal timed out after {timeout} seconds (waiting on status file)",
-                    timeout=timeout,
+            ):
+                # Nothing was started, so there is no status file to wait for; waiting for one
+                # anyway would cost the whole timeout before saying the same thing.
+                raise CLIExecutionError(
+                    message="The Antigravity terminal bridge did not create the terminal.",
+                    returncode=1,
                     command=cmd,
                 )
+
+            try:
+                # Wait for status file completion
+                deadline = time.time() + timeout + pause_on_completion + 30
+                status_data: Optional[Dict[str, Any]] = None
+
+                while time.time() < deadline:
+                    if os.path.isfile(status_file):
+                        try:
+                            with open(status_file, "r", encoding="utf-8") as sf:
+                                status_data = json.load(sf)
+                            break
+                        except (json.JSONDecodeError, PermissionError):
+                            time.sleep(0.1)
+                    time.sleep(0.2)
+
+                if not status_data:
+                    raise CLITimeoutError(
+                        f"Integrated agent terminal timed out after {timeout} seconds (waiting on status file)",
+                        timeout=timeout,
+                        command=cmd,
+                    )
+                if close_on_completion and pause_on_completion > 0:
+                    # The runner writes its result before its own pause, so without this the
+                    # tab would close before anyone could read how the execution ended.
+                    time.sleep(float(pause_on_completion))
+            finally:
+                # A timed-out or interrupted run's tab is closed whatever the setting says:
+                # its runner may still be working, and a kept tab is only for finished work.
+                if close_on_completion or not status_data:
+                    close_antigravity_integrated_terminal(title=tab_title)
         else:
             wt_path = None
             if norm_type in ("windows_terminal", "wt") or norm_type == "auto":
@@ -523,34 +627,54 @@ def run_agent_cli(
             else:
                 # Native Windows console allocation with CREATE_NEW_CONSOLE (0x00000010)
                 create_new_console_flag = 0x00000010
-                proc = subprocess.Popen(
+                from orchestrator.process_jobs import release_owned, spawn_owned
+
+                # The runner and the agent it starts are one owned tree: a hard kill of the
+                # orchestrator closes the window and ends the agent with it.
+                proc = spawn_owned(
                     runner_args,
                     cwd=working_dir,
                     env=runner_env,
                     creationflags=create_new_console_flag,
                 )
 
-                try:
-                    proc.wait(timeout=timeout + pause_on_completion + 30)
-                except subprocess.TimeoutExpired as exc:
-                    try:
-                        proc.kill()
-                    except Exception:
-                        pass
-                    raise CLITimeoutError(
-                        f"Visible agent terminal timed out after {timeout} seconds",
-                        timeout=timeout,
-                        command=cmd,
-                    ) from exc
-
-                # Read status file
+                # The result is the status file, not the window's exit: a window kept open for
+                # inspection (`hold_open`) is still running after the agent has finished.
+                deadline = time.time() + timeout + pause_on_completion + 30
                 status_data = None
-                if os.path.isfile(status_file):
-                    try:
-                        with open(status_file, "r", encoding="utf-8") as sf:
-                            status_data = json.load(sf)
-                    except Exception:
-                        status_data = None
+                while status_data is None:
+                    if os.path.isfile(status_file):
+                        try:
+                            with open(status_file, "r", encoding="utf-8") as sf:
+                                status_data = json.load(sf)
+                            break
+                        except Exception:
+                            status_data = None
+                    if proc.poll() is not None and not os.path.isfile(status_file):
+                        break
+                    if time.time() >= deadline:
+                        # The runner's own agent child is part of this tree.
+                        stop_tree(proc)
+                        raise CLITimeoutError(
+                            f"Visible agent terminal timed out after {timeout} seconds",
+                            timeout=timeout,
+                            command=cmd,
+                        )
+                    time.sleep(0.2)
+
+                if job_spec["hold_open"]:
+                    # Kept for inspection on purpose, waiting for Enter; its agent has already
+                    # finished and written its result, so the window may outlive this process.
+                    release_owned(proc)
+                else:
+                    # It closes itself after its pause. Closing its job now would cut that pause
+                    # short, so the job is closed once the window has gone - or, if it has not
+                    # gone in time, closing it ends it.
+                    threading.Thread(
+                        target=_finish_when_exited,
+                        args=(proc, float(pause_on_completion) + 10.0),
+                        daemon=True,
+                    ).start()
 
                 if not status_data:
                     # Fallback if runner terminated abnormally
@@ -583,6 +707,17 @@ def run_agent_cli(
             pass
 
 
+def _finish_when_exited(process: Any, timeout: float) -> None:
+    """Close an owned process's job once it exits by itself, or after `timeout`. Never raises."""
+    from orchestrator.process_jobs import finish_owned
+
+    try:
+        process.wait(timeout=timeout)
+    except Exception:
+        pass
+    finish_owned(process)
+
+
 def _runner_entrypoint(job_file_path: str) -> None:
     """Internal runner entrypoint executed inside the visible terminal window."""
     with open(job_file_path, "r", encoding="utf-8") as f:
@@ -597,6 +732,7 @@ def _runner_entrypoint(job_file_path: str) -> None:
     status_file = job.get("status_file")
     timeout = job.get("timeout", 180)
     pause_seconds = job.get("pause_seconds", 1.5)
+    hold_open = bool(job.get("hold_open", False))
 
     # Set console window title via Win32 API and ANSI sequence
     try:
@@ -623,9 +759,11 @@ def _runner_entrypoint(job_file_path: str) -> None:
     print("-" * 72)
     sys.stdout.flush()
 
+    from orchestrator.process_jobs import finish_owned, spawn_owned, watch_owner
+
     t0 = time.time()
     try:
-        proc = subprocess.Popen(
+        proc = spawn_owned(
             cmd,
             cwd=cwd,
             stdin=subprocess.DEVNULL,
@@ -678,18 +816,27 @@ def _runner_entrypoint(job_file_path: str) -> None:
     t_out.start()
     t_err.start()
 
+    # This window may be hosted by Windows Terminal or the IDE, not by the orchestrator, so the
+    # orchestrator's job cannot own it. If the orchestrator is gone, nobody will read this result:
+    # the agent is stopped rather than left writing into a worktree a resumed run may be using.
+    owner_gone = threading.Event()
+
+    def _on_owner_gone() -> None:
+        owner_gone.set()
+        stop_tree(proc)
+
+    watch_owner(job.get("owner_pid"), _on_owner_gone)
+
     timed_out = False
     try:
         proc.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
         timed_out = True
-        try:
-            proc.kill()
-        except Exception:
-            pass
+        stop_tree(proc)
 
     t_out.join(timeout=2.0)
     t_err.join(timeout=2.0)
+    finish_owned(proc)
     elapsed = round(time.time() - t0, 2)
 
     returncode = proc.returncode if not timed_out else -1
@@ -698,6 +845,8 @@ def _runner_entrypoint(job_file_path: str) -> None:
 
     if timed_out:
         full_stderr += f"\nProcess timed out after {timeout} seconds\n"
+    if owner_gone.is_set():
+        full_stderr += "\nThe orchestrator that started this agent exited; the agent was stopped.\n"
 
     # Write status file atomically
     if status_file:
@@ -723,12 +872,21 @@ def _runner_entrypoint(job_file_path: str) -> None:
     print("-" * 72)
     status_label = "TIMEOUT" if timed_out else ("SUCCESS" if returncode == 0 else f"FAILED (code {returncode})")
     print(f"  Execution finished: {status_label} in {elapsed}s")
-    if pause_seconds > 0:
+    if hold_open:
+        print("  Kept open for inspection (execution.close_terminal_on_completion: false).")
+    elif pause_seconds > 0:
         print(f"  Closing terminal in {pause_seconds}s...")
     print("=" * 72)
     sys.stdout.flush()
 
-    if pause_seconds > 0:
+    if hold_open:
+        # The orchestrator already has the result from the status file and has moved on; this
+        # window stays until a person closes it.
+        try:
+            input("  Press Enter to close this window. ")
+        except (EOFError, KeyboardInterrupt, OSError):
+            pass
+    elif pause_seconds > 0:
         time.sleep(pause_seconds)
 
     sys.exit(returncode if returncode >= 0 else 1)

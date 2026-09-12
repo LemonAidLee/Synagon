@@ -3,13 +3,13 @@
 import json
 import os
 import shutil
-import subprocess
-from typing import Optional, List, Tuple, Any
+from typing import Any, Dict, List, Optional, Tuple
 
-from orchestrator.agents.exceptions import CLIExecutionError, CLITimeoutError
+from orchestrator.agents.exceptions import CLIExecutionError
 from orchestrator.agents.opencode_tui import run_opencode_native_tui
+from orchestrator.agents.opencode_usage import usage_from_step_tokens
 from orchestrator.launcher import check_antigravity_bridge, get_antigravity_bridge_url, run_agent_cli
-from orchestrator.types import TokenUsage, create_token_usage, unavailable_token_usage
+from orchestrator.types import TokenUsage, unavailable_token_usage
 
 
 def parse_opencode_output(stdout: str) -> Tuple[str, TokenUsage]:
@@ -18,7 +18,8 @@ def parse_opencode_output(stdout: str) -> Tuple[str, TokenUsage]:
     Handles:
     1. JSON lines format from '--format json':
        - 'text' event parts concatenated to form the response text
-       - 'step_finish' or 'step-finish' events containing tokens: { input, output, total, ... }
+       - 'step_finish' or 'step-finish' events, whose per-step `tokens` are summed by the same
+         normaliser native TUI mode uses (`opencode_usage.usage_from_step_tokens`)
     2. Non-JSON fallback (e.g. plain text from mocked CLI or older versions):
        - text = stdout.strip()
        - usage = unavailable_token_usage()
@@ -34,13 +35,7 @@ def parse_opencode_output(stdout: str) -> Tuple[str, TokenUsage]:
 
     raw = stdout.strip()
     text_chunks: List[str] = []
-    input_tokens = 0
-    output_tokens = 0
-    total_tokens = 0
-    cache_read_tokens = 0
-    reasoning_tokens = 0
-    raw_usage_events: List[Dict[str, Any]] = []
-    found_tokens = False
+    step_tokens: List[Dict[str, Any]] = []
     is_json = False
 
     for line in raw.splitlines():
@@ -70,49 +65,36 @@ def parse_opencode_output(stdout: str) -> Tuple[str, TokenUsage]:
         if ev_type in ("step_finish", "step-finish") or part_type in ("step_finish", "step-finish"):
             tokens_dict = part_dict.get("tokens") or event.get("tokens")
             if isinstance(tokens_dict, dict):
-                raw_usage_events.append(dict(tokens_dict))
-                inp = tokens_dict.get("input")
-                out = tokens_dict.get("output")
-                tot = tokens_dict.get("total")
-                cache_dict = tokens_dict.get("cache") or {}
-                c_read = cache_dict.get("read") if isinstance(cache_dict, dict) else None
-                reasoning = tokens_dict.get("reasoning")
-
-                if isinstance(inp, int):
-                    input_tokens += inp
-                    found_tokens = True
-                if isinstance(out, int):
-                    output_tokens += out
-                    found_tokens = True
-                if isinstance(tot, int):
-                    total_tokens += tot
-                    found_tokens = True
-                if isinstance(c_read, int):
-                    cache_read_tokens += c_read
-                if isinstance(reasoning, int):
-                    reasoning_tokens += reasoning
+                step_tokens.append(tokens_dict)
 
     if is_json and text_chunks:
         response_text = "".join(text_chunks).strip()
     else:
         response_text = raw
 
-    if found_tokens:
-        if total_tokens == 0 and (input_tokens > 0 or output_tokens > 0):
-            total_tokens = input_tokens + output_tokens + cache_read_tokens
-        token_usage = create_token_usage(
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            total_tokens=total_tokens,
-            cache_read_tokens=cache_read_tokens if cache_read_tokens > 0 else None,
-            reasoning_tokens=reasoning_tokens if reasoning_tokens > 0 else None,
-            available=True,
-            raw_usage={"steps": raw_usage_events} if raw_usage_events else None,
-        )
-    else:
-        token_usage = unavailable_token_usage()
+    return response_text, usage_from_step_tokens(step_tokens, source="opencode-run-json")
 
-    return response_text, token_usage
+
+def _stream_error(stdout: str) -> Optional[str]:
+    """The message of the last `error` event in a `run --format json` stream, if any."""
+    message = None
+    for line in (stdout or "").splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            event = json.loads(line)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        if not isinstance(event, dict) or event.get("type") != "error":
+            continue
+        error = event.get("error")
+        if isinstance(error, dict):
+            data = error.get("data") if isinstance(error.get("data"), dict) else {}
+            message = f"{error.get('name') or 'error'}: {data.get('message') or ''}".rstrip(": ")
+        elif error:
+            message = str(error)
+    return message[:300] if message else None
 
 
 def get_opencode_executable_path() -> str:
@@ -152,6 +134,51 @@ def get_opencode_executable_path() -> str:
     )
 
 
+#: The execution modes an agent adapter accepts (validated at config load and on the CLI).
+EXECUTION_MODES = ("auto", "native_tui", "headless")
+
+#: Terminal types whose visible surface *is* the Antigravity integrated terminal (when its
+#: bridge is online) - the only non-daemon surface that can host OpenCode's native TUI.
+_INTEGRATED_TERMINAL_TYPES = ("antigravity_integrated", "integrated", "auto")
+
+
+def resolve_opencode_execution_mode(
+    agent_execution_mode: Optional[str],
+    visible: bool = False,
+    terminal_type: str = "auto",
+    recorder_installed: bool = False,
+) -> str:
+    """Decide, deterministically, whether this OpenCode execution is native TUI or headless.
+
+    * ``native_tui`` - always ``"native_tui"``. If no surface can show it, the controller
+      raises `NativeTUIUnavailableError`; it never silently becomes headless.
+    * ``headless`` - always ``"headless"``: ``opencode run --format json``, optionally inside a
+      visible terminal, which is a visible *headless* run and not a native TUI.
+    * ``auto`` - ``"native_tui"`` exactly when a surface for the real TUI exists: a daemon
+      recorder (the cockpit panel, via a pty), or a visible run on an integrated terminal type
+      whose Antigravity bridge answers its health check right now. Otherwise ``"headless"``.
+
+    Raises:
+        CLIExecutionError: For a mode that is not one of `EXECUTION_MODES` - a typo must not
+            quietly select a different execution path.
+    """
+    mode = str(agent_execution_mode or "auto").strip().lower()
+    if mode not in EXECUTION_MODES:
+        raise CLIExecutionError(
+            f"Unknown agent_execution_mode '{agent_execution_mode}'. "
+            f"Must be one of: {', '.join(EXECUTION_MODES)}."
+        )
+    if mode != "auto":
+        return mode
+    if recorder_installed:
+        return "native_tui"
+    if visible and str(terminal_type or "auto").lower() in _INTEGRATED_TERMINAL_TYPES:
+        bridge_url = get_antigravity_bridge_url()
+        if bridge_url and check_antigravity_bridge(bridge_url):
+            return "native_tui"
+    return "headless"
+
+
 def run_opencode_with_usage(
     prompt: str,
     timeout: int = 180,
@@ -166,6 +193,7 @@ def run_opencode_with_usage(
     tracer: Optional[object] = None,
     agent_execution_mode: str = "auto",
     return_execution_mode: bool = False,
+    close_on_completion: bool = True,
 ) -> Any:
     """Execute OpenCode CLI in native TUI or headless mode and return response text and TokenUsage.
 
@@ -184,17 +212,19 @@ def run_opencode_with_usage(
         agent_execution_mode: Execution mode: 'auto' (prefer native TUI where supported),
                               'native_tui' (require native TUI), or 'headless'.
         return_execution_mode: When True, return (response_text, token_usage, execution_mode).
+        close_on_completion: Native TUI only. False keeps the session's server and its TUI tab
+            open after a completed turn, registered for `--close-sessions` (see
+            `orchestrator.native_sessions`).
 
     Returns:
         Tuple of (response_text, token_usage) or (response_text, token_usage, execution_mode).
 
     Raises:
         CLITimeoutError: If execution exceeds the specified timeout.
-        CLIExecutionError: If opencode exits with a non-zero code or bridge is offline.
+        CLIExecutionError: If opencode exits with a non-zero code.
+        NativeTUIUnavailableError: If `native_tui` is required and no surface can show it.
         FileNotFoundError: If the opencode executable cannot be found.
     """
-    exec_mode_str = (agent_execution_mode or "auto").strip().lower()
-
     # A recorder (installed by the daemon, Roadmap Phase 10) means there is somewhere for a
     # live view to go that is not the Antigravity IDE's own bridge - the cockpit's terminal
     # panel. When one is present, native TUI no longer needs that bridge to be worth using:
@@ -203,20 +233,10 @@ def run_opencode_with_usage(
     from orchestrator.launcher import get_output_recorder
 
     recorder = get_output_recorder()
-
-    # Determine whether to use native TUI execution
-    use_native_tui = False
-    if exec_mode_str == "native_tui":
-        use_native_tui = True
-    elif exec_mode_str == "auto":
-        if recorder is not None:
-            use_native_tui = True
-        else:
-            is_integrated = terminal_type in ("antigravity_integrated", "integrated", "auto")
-            bridge_url = get_antigravity_bridge_url()
-            bridge_active = bool(bridge_url and check_antigravity_bridge(bridge_url))
-            if visible and is_integrated and bridge_active:
-                use_native_tui = True
+    use_native_tui = resolve_opencode_execution_mode(
+        agent_execution_mode, visible=visible, terminal_type=terminal_type,
+        recorder_installed=recorder is not None,
+    ) == "native_tui"
 
     if use_native_tui:
         sink = None
@@ -229,17 +249,24 @@ def run_opencode_with_usage(
             except Exception:
                 sink = None
 
-        response_text, token_usage = run_opencode_native_tui(
-            prompt=prompt,
-            project_root=working_dir or os.getcwd(),
-            model_name=model,
-            timeout_seconds=timeout,
-            pause_on_completion=pause_on_completion,
-            terminal_title=title,
-            tracer=tracer,
-            sink=sink,
-        )
         stream = getattr(sink, "stream", None)
+        try:
+            response_text, token_usage = run_opencode_native_tui(
+                prompt=prompt,
+                project_root=working_dir or os.getcwd(),
+                model_name=model,
+                timeout_seconds=timeout,
+                pause_on_completion=pause_on_completion,
+                terminal_title=title,
+                tracer=tracer,
+                sink=sink,
+                close_on_completion=close_on_completion,
+            )
+        except BaseException:
+            # The live panel must not be left reading "running" for an execution that died.
+            if stream is not None:
+                stream.close(None)
+            raise
         if stream is not None:
             stream.close(0)
         if return_execution_mode:
@@ -277,15 +304,25 @@ def run_opencode_with_usage(
         terminal_type=terminal_type,
         pause_on_completion=pause_on_completion,
         tracer=tracer,
+        close_on_completion=close_on_completion,
     )
 
     if exec_result.returncode != 0:
+        # A failed run's event stream still carries the step-finish usage of every step that
+        # completed before the failure, and an `error` event saying why (measured on 1.18.29:
+        # exit 1 with `{"type":"error",...}`). Both travel with the failure.
+        _text, failed_usage = parse_opencode_output(exec_result.stdout or "")
+        message = f"OpenCode CLI execution failed with code {exec_result.returncode}"
+        error = _stream_error(exec_result.stdout or "")
+        if error:
+            message += f": {error}"
         raise CLIExecutionError(
-            message=f"OpenCode CLI execution failed with code {exec_result.returncode}",
+            message=message,
             returncode=exec_result.returncode,
             stdout=exec_result.stdout,
             stderr=exec_result.stderr,
             command=cmd,
+            token_usage=failed_usage if failed_usage.get("available") else None,
         )
 
     output = exec_result.stdout.strip() if exec_result.stdout else exec_result.stderr.strip()
@@ -310,6 +347,7 @@ def run_opencode(
     agent_execution_mode: str = "auto",
     return_usage: bool = False,
     return_execution_mode: bool = False,
+    close_on_completion: bool = True,
 ) -> Any:
     """Execute OpenCode CLI in native TUI or headless mode and return response text.
 
@@ -332,6 +370,7 @@ def run_opencode(
         tracer=tracer,
         agent_execution_mode=agent_execution_mode,
         return_execution_mode=return_execution_mode,
+        close_on_completion=close_on_completion,
     )
     if return_execution_mode:
         return res

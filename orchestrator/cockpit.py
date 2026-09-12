@@ -26,6 +26,7 @@ from typing import Any, Dict, List, Optional
 
 from orchestrator.config import ladder_rungs
 from orchestrator.teams import phases_of
+from orchestrator.types import result_token_rows, result_tokens_spent
 
 #: An agent that has not been launched in the run being watched.
 AGENT_IDLE = "idle"
@@ -133,10 +134,9 @@ def agent_states(events: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
             # field on the dict at all. Missing either check here is exactly how a
             # researcher's hard failure used to be drawn as a green, finished card.
             failed = str(result.get("status") or "") == "error" or verdict in FAILING_VERDICTS
-            usage = result.get("token_usage") or {}
-            tokens = previous.get("tokens", 0)
-            if usage.get("available") and usage.get("total_tokens"):
-                tokens += int(usage["total_tokens"])
+            # Everything this execution paid for, its failed retry/escalation attempts included,
+            # read the one way every other total reads it (types.result_tokens_spent).
+            tokens = previous.get("tokens", 0) + result_tokens_spent(result)[0]
             states[key] = {
                 "state": AGENT_FAILED if failed else AGENT_DONE,
                 "agent": result.get("agent"),
@@ -180,11 +180,23 @@ def columns(
         for index, entry in enumerate(phase.get("agents") or []):
             rungs = ladder_rungs(entry)
             first_agent = rungs[0][0]
-            key = "%s/%s" % (first_agent, entry.get("role"))
             # An agent ladder means one card can be worked by more than one agent, so the
             # card follows whichever rung the run actually reached - the most recent event
             # wins. Reading rung 0 alone would draw an escalated card as still idle.
             live = _latest_state(states, rungs, entry.get("role"))
+            # The terminal registry keys its streams by the agent that actually launched
+            # them (terminals.py's live_by_agent), so the lookup below has to follow the
+            # same escalated agent `live` does - rung 0 alone would go stale the moment a
+            # run escalates past it.
+            terminal_agent = live.get("agent") or first_agent
+            terminal_key = "%s/%s" % (terminal_agent, entry.get("role"))
+            # A card's spend is every rung's, not only the rung it ended on: an escalation's
+            # results are recorded under whichever agent produced them.
+            rung_agents = list(dict.fromkeys(str(agent) for agent, _model in rungs))
+            card_tokens = sum(
+                int((states.get("%s/%s" % (agent, entry.get("role"))) or {}).get("tokens") or 0)
+                for agent in rung_agents
+            )
             cards.append(
                 {
                     "key": agent_key(first_agent, entry.get("role"), index),
@@ -199,10 +211,10 @@ def columns(
                     "state": live.get("state") or AGENT_IDLE,
                     "verdict": live.get("verdict"),
                     "error": live.get("error"),
-                    "tokens": live.get("tokens") or 0,
+                    "tokens": card_tokens,
                     "duration_seconds": live.get("duration_seconds"),
                     "repair_attempt": live.get("repair_attempt"),
-                    "terminal_id": terminals.get(key),
+                    "terminal_id": terminals.get(terminal_key),
                 }
             )
 
@@ -216,6 +228,42 @@ def columns(
             }
         )
     return out
+
+
+def run_tokens(events: Optional[List[Dict[str, Any]]]) -> Dict[str, Any]:
+    """What the watched run has spent, read from its results the way `--stats` and the CLI's
+    summary table read them. Pure.
+
+    The page used to add up its cards, and a card is not a unit of spend: identical members of
+    an ensemble share one event key (see `agent_states`), so their cards show the same figure
+    and summing the cards counted it once per card.
+
+    Returns ``{known, complete, failed_attempt_tokens, failed_attempts}``: `known` is every
+    reported token, failed attempts included; `complete` is False when any execution or attempt
+    reported nothing, in which case `known` is a floor rather than the total (invariant 5).
+    """
+    known = 0
+    complete = True
+    failed_tokens = 0
+    failed_attempts = 0
+    for event in events or []:
+        if event.get("event") != "agent_result":
+            continue
+        for attempt, total in result_token_rows(event.get("result") or {}):
+            if attempt is not None:
+                failed_attempts += 1
+            if total is None:
+                complete = False
+                continue
+            known += total
+            if attempt is not None:
+                failed_tokens += total
+    return {
+        "known": known,
+        "complete": complete,
+        "failed_attempt_tokens": failed_tokens,
+        "failed_attempts": failed_attempts,
+    }
 
 
 def column_state(cards: List[Dict[str, Any]]) -> str:

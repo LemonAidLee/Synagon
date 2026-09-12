@@ -26,6 +26,16 @@ class WorkflowEvent:
     metadata: Optional[dict] = None
 
 
+def _attempt_tokens_note(token_usage: Optional[TokenUsage]) -> str:
+    """"12,232 tokens reported; " for a failed attempt that reported usage, else nothing."""
+    if not token_usage or token_usage.get("available") is not True:
+        return ""
+    total = token_usage.get("total_tokens")
+    if not isinstance(total, int):
+        return ""
+    return f"{total:,} tokens reported; "
+
+
 class ExecutionTracer:
     """Manages recording and rendering observable orchestration events."""
 
@@ -284,6 +294,7 @@ class ExecutionTracer:
         next_model: Optional[str] = None,
         next_agent: Optional[str] = None,
         backoff_seconds: float = 0.0,
+        token_usage: Optional[TokenUsage] = None,
     ) -> None:
         """Report that an execution failed and is about to be attempted again.
 
@@ -324,12 +335,32 @@ class ExecutionTracer:
                     "next_model": next_model,
                     "next_agent": next_agent,
                     "backoff_seconds": backoff_seconds,
+                    "token_usage": dict(token_usage) if token_usage else None,
                 },
             ),
             console_msg=(
                 f"  {Fore.YELLOW}[RETRY]{Style.RESET_ALL} {agent} ({role}) "
                 f"attempt {attempt}/{of} failed: {reason}\n"
-                f"          retrying in {backoff_seconds:.1f}s{switching}"
+                f"          {_attempt_tokens_note(token_usage)}"
+                f"retrying in {backoff_seconds:.1f}s{switching}"
+            ),
+        )
+
+    def log_native_session_retained(self, title: str, session_id: str, port: int) -> None:
+        """Report that a native TUI session was kept open for inspection."""
+        self._emit(
+            WorkflowEvent(
+                name="native_session_retained",
+                stage="opencode",
+                agent="opencode",
+                message=f"Native TUI session {session_id} kept open in '{title}' (port {port})",
+                status="info",
+                metadata={"title": title, "session_id": session_id, "port": port},
+            ),
+            console_msg=(
+                f"  {Fore.MAGENTA}[TERMINAL]{Style.RESET_ALL} Native TUI kept open for inspection: "
+                f"\"{title}\"\n"
+                f"          close it with: python -m orchestrator --close-sessions"
             ),
         )
 

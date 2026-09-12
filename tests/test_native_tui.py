@@ -181,7 +181,10 @@ class TestOpenCodeNativeTUIController(unittest.TestCase):
         self.assertEqual(tokens["output_tokens"], 50)
         self.assertEqual(tokens["input_tokens"], 175)  # 150 + 25 cache
         mock_launch.assert_called_once()
-        mock_close.assert_called_once_with(title="LangGraph - OpenCode Implementer", bridge_url="http://127.0.0.1:49182")
+        # The tab title carries the session id's tail, so closing this tab can never close an
+        # older one of the same name that was deliberately kept open (close_on_completion=False).
+        self.assertEqual(mock_launch.call_args.kwargs["title"], "LangGraph - OpenCode Implementer [es-abc]")
+        mock_close.assert_called_once_with(title="LangGraph - OpenCode Implementer [es-abc]", bridge_url="http://127.0.0.1:49182")
         mock_proc.terminate.assert_called_once()
 
     @patch("orchestrator.agents.opencode_tui.get_antigravity_bridge_url", return_value="http://127.0.0.1:49182")
@@ -234,7 +237,7 @@ class TestOpenCodeNativeTUIController(unittest.TestCase):
                 timeout_seconds=1,
                 pause_on_completion=0.0,
             )
-        mock_close.assert_called_once_with(title="LangGraph - OpenCode Implementer", bridge_url="http://127.0.0.1:49182")
+        mock_close.assert_called_once_with(title="LangGraph - OpenCode Implementer [imeout]", bridge_url="http://127.0.0.1:49182")
 
 
 class TestOpenCodeAdapterExecutionMode(unittest.TestCase):

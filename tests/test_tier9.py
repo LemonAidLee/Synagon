@@ -634,6 +634,34 @@ class TestTheCockpitPage(unittest.TestCase):
         except re.error as exc:
             self.fail(f"the file viewer's tokenizer regex does not compile: {exc}")
 
+    def test_every_tokenizer_regex_compiles_and_none_is_built_per_token(self):
+        """ARCHITECTURE.md §30.3 recorded that the test above covered one of four patterns: the
+        keyword, type and builtin matchers were rebuilt from a template literal for every token,
+        so an edit to one of those lists could reproduce the same bug class unseen. They are now
+        compiled once beside `tokenRegex`, and each is compiled here."""
+        body = re.search(r"function tokenize\(code, lang\) \{(.*?)\n    \}\n", self.text, re.S)
+        self.assertIsNotNone(body, "tokenize() moved")
+        self.assertNotIn("new RegExp", body.group(1), "a regex is being built per call again")
+
+        lists = {
+            name: re.search(rf'const {name} = "(.*?)";', self.text).group(1)
+            for name in ("keywords", "types", "builtins")
+        }
+        found = re.findall(r"const (\w+Regex) = new RegExp\(`(.*?)`(?:, '\w+')?\);", self.text)
+        self.assertEqual(
+            {name for name, _ in found},
+            {"tokenRegex", "keywordRegex", "typeRegex", "builtinRegex"},
+        )
+        for name, pattern in found:
+            for list_name, value in lists.items():
+                pattern = pattern.replace("${%s}" % list_name, value)
+            pattern = pattern.replace("\\\\", "\\")
+            with self.subTest(regex=name):
+                try:
+                    re.compile(pattern, re.M)
+                except re.error as exc:
+                    self.fail(f"{name} does not compile: {exc}")
+
     def test_the_page_never_double_escapes_a_regex(self):
         r"""A quadruple backslash in a template literal is the fingerprint of that bug.
 

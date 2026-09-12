@@ -179,7 +179,7 @@ async function openProject(projectRoot) {
     minWidth: 900,
     minHeight: 600,
     backgroundColor: "#10131a",
-    title: `Orchestrator — ${path.basename(projectRoot)}`,
+    title: `Synagon — ${path.basename(projectRoot)}`,
     show: false,
     webPreferences: {
       // The cockpit is a plain page served over loopback; it needs no Node, and giving it

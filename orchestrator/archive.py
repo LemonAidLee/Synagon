@@ -58,6 +58,7 @@ from typing import Any, Dict, List, Optional
 
 from orchestrator.store import (
     RUN_EVENTS_FILENAME,
+    RUN_META_FILENAME,
     list_runs,
     runs_root,
     utc_now_iso,
@@ -109,7 +110,9 @@ def run_evidence(run_dir: str) -> Dict[str, Any]:
 
     path = os.path.join(run_dir, RUN_EVENTS_FILENAME)
     try:
-        with open(path, "r", encoding="utf-8") as handle:
+        # errors="replace" matches store.py's load_run: a run killed mid-write can leave a
+        # torn multi-byte sequence at EOF, and this function promises never to raise over it.
+        with open(path, "r", encoding="utf-8", errors="replace") as handle:
             evidence["readable"] = True
             for line in handle:
                 line = line.strip()
@@ -339,7 +342,7 @@ def list_archived(
         row: Dict[str, Any] = {"run_id": entry, "path": source, "task": "", "status": ""}
         row.update(_archived_meta(source))
         try:
-            with open(os.path.join(source, "run.json"), "r", encoding="utf-8") as fh:
+            with open(os.path.join(source, RUN_META_FILENAME), "r", encoding="utf-8") as fh:
                 meta = json.load(fh)
             row["task"] = str(meta.get("task") or "").replace("\n", " ")[:70]
             row["status"] = str(meta.get("status") or "")
@@ -359,14 +362,20 @@ def _move(source: str, target: str) -> None:
 
     ``os.replace`` cannot cross a filesystem and refuses a non-empty target, both of which
     are correct here. The fallback copies first and only then removes the source, so an
-    interrupted move leaves the run readable in its original place.
+    interrupted move leaves the run readable in its original place. If the source can't be
+    removed after copying (e.g. a file still locked on Windows), the copy is torn down too -
+    a failed move never leaves the run duplicated in both the store and the archive.
     """
     os.makedirs(os.path.dirname(target) or ".", exist_ok=True)
     try:
         os.replace(source, target)
     except OSError:
         shutil.copytree(source, target, dirs_exist_ok=False)
-        shutil.rmtree(source)
+        try:
+            shutil.rmtree(source)
+        except OSError:
+            shutil.rmtree(target, ignore_errors=True)
+            raise
 
 
 def execute_archive(

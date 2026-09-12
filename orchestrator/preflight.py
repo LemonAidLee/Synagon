@@ -305,17 +305,18 @@ def check_verifier_independence(config: Optional[OrchestratorConfig]) -> List[st
 
     warnings: List[str] = []
     for other_role in ("planner", "implementer"):
-        others = [a for a in agents if a.get("role") == other_role]
+        # Each entry's rungs are computed once, not once per (verifier, other) pair.
+        others = [ladder_rungs(a) for a in agents if a.get("role") == other_role]
         if not others:
             continue
         for verifier in verifiers:
             verifier_rungs = ladder_rungs(verifier)
-            for other in others:
+            for other_rungs in others:
                 # Any shared rung, not just the first pairing. A ladder that escalates the
                 # verifier onto the implementer's model loses independence at exactly the
                 # moment it matters most - the run has already gone wrong twice - and a check
                 # that only read rung 0 would call that setup independent.
-                shared = [r for r in verifier_rungs if r in ladder_rungs(other)]
+                shared = [r for r in verifier_rungs if r in other_rungs]
                 if not shared:
                     continue
                 detail = (
@@ -362,11 +363,94 @@ def check_acceptance_command(config: Optional[OrchestratorConfig]) -> List[str]:
     return []
 
 
+def check_execution_mode(
+    config: Optional[OrchestratorConfig],
+    execution_mode: Optional[str] = None,
+) -> List[str]:
+    """Errors for `agent_execution_mode: native_tui` naming an agent that cannot honour it.
+
+    `native_tui` is strict: it means the agent's real interactive interface, driven through a
+    supported programmatic integration, and nothing less. Only OpenCode has one. Discovering that
+    the planner is Claude Code *after* the researcher has been paid for is exactly the failure
+    preflight exists to prevent, so every rung of every entry is checked here, before any agent
+    is launched - and the run is refused rather than silently downgraded to headless.
+    """
+    from orchestrator.agents import NATIVE_TUI_AGENTS, supports_native_tui
+
+    mode = str(
+        execution_mode
+        or ((config or {}).get("execution") or {}).get("agent_execution_mode")
+        or "auto"
+    ).strip().lower()
+    if mode != "native_tui":
+        return []
+
+    unsupported: List[str] = []
+    for entry in (config or {}).get("agents") or []:
+        for agent, _model in ladder_rungs(entry):
+            label = f"{agent} ({entry.get('role') or '?'})"
+            if not supports_native_tui(agent) and label not in unsupported:
+                unsupported.append(label)
+    if not unsupported:
+        return []
+    return [
+        "execution mode: agent_execution_mode is 'native_tui', but "
+        f"{', '.join(unsupported)} {'has' if len(unsupported) == 1 else 'have'} no supported "
+        "programmatic native TUI integration "
+        f"(supported: {', '.join(sorted(NATIVE_TUI_AGENTS))}). native_tui never falls back to "
+        "headless; use 'auto' to run native TUI where it is supported and headless elsewhere, "
+        "or 'headless'."
+    ]
+
+
+#: Terminal types that can only be served by the Antigravity IDE's terminal bridge.
+BRIDGE_TERMINAL_TYPES = ("antigravity_integrated", "integrated")
+
+
+def check_terminal_surface(
+    config: Optional[OrchestratorConfig],
+    visible_terminals: Optional[bool] = None,
+    terminal_type: Optional[str] = None,
+) -> List[str]:
+    """Errors for a visible run whose terminal can only be the Antigravity bridge, when it is down.
+
+    `terminal_type: antigravity_integrated` has no fallback: the launcher refuses every agent
+    when the bridge does not answer. Found that way, the refusal came after the first agent had
+    been started and retried with backoff - for a fact that was knowable before anything ran.
+    `auto` falls back to another terminal, and under the daemon a recorder shows the output
+    instead of any window, so neither needs the bridge. One loopback health check; nothing is
+    launched.
+    """
+    execution = (config or {}).get("execution") or {}
+    visible = execution.get("visible_terminals", False) if visible_terminals is None else visible_terminals
+    kind = str(terminal_type or execution.get("terminal_type") or "auto").strip().lower()
+    if not visible or kind not in BRIDGE_TERMINAL_TYPES:
+        return []
+
+    from orchestrator.launcher import (
+        check_antigravity_bridge,
+        get_antigravity_bridge_url,
+        get_output_recorder,
+    )
+
+    if get_output_recorder() is not None or check_antigravity_bridge():
+        return []
+    return [
+        f"terminal: terminal_type is '{kind}' with visible terminals on, but the Antigravity IDE "
+        f"terminal bridge is not answering at {get_antigravity_bridge_url()}, and that terminal "
+        "type has no fallback. Start the IDE with the bridge extension active, or run with "
+        "--terminal-type auto or --no-visible-terminals."
+    ]
+
+
 def run_preflight(
     config: Optional[OrchestratorConfig],
     deep: bool = False,
     strict: bool = True,
     timeout: int = 15,
+    execution_mode: Optional[str] = None,
+    visible_terminals: Optional[bool] = None,
+    terminal_type: Optional[str] = None,
 ) -> PreflightReport:
     """Probe every agent in the configuration.
 
@@ -375,6 +459,10 @@ def run_preflight(
         deep: When True, invoke each distinct binary's version command.
         strict: Recorded on the report; the caller decides whether to halt.
         timeout: Seconds allowed per deep version probe.
+        execution_mode: The run's resolved `agent_execution_mode` (a CLI override may differ
+            from the configuration); read from the configuration when omitted.
+        visible_terminals: The run's resolved visibility; read from the configuration when omitted.
+        terminal_type: The run's resolved terminal type; read from the configuration when omitted.
 
     Returns:
         A PreflightReport. ``ok`` is False when any agent probe reported an error.
@@ -437,6 +525,8 @@ def run_preflight(
         errors.extend(f"{label}: {msg}" for msg in probe.get("errors") or [])
         warnings.extend(f"{label}: {msg}" for msg in probe.get("warnings") or [])
 
+    errors.extend(check_execution_mode(config, execution_mode))
+    errors.extend(check_terminal_surface(config, visible_terminals, terminal_type))
     warnings.extend(check_verifier_independence(config))
     warnings.extend(check_acceptance_command(config))
 

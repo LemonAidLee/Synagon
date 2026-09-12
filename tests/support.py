@@ -96,6 +96,37 @@ class RunStoreGuard:
         )
 
 
+class FakeProcess:
+    """What `subprocess.Popen` returns, for a test that patches it to stand in for an agent CLI.
+
+    The launcher starts headless agents with `Popen` (so a timeout can stop the whole process
+    tree), so that is the seam an adapter test mocks. `times_out=True` makes every wait time
+    out, which the launcher turns into `CLITimeoutError` once its deadline passes.
+    """
+
+    pid = None  # never a real PID: a tree stop on a fake process must not reach taskkill
+
+    def __init__(self, returncode: int = 0, stdout: str = "", stderr: str = "", times_out: bool = False):
+        self.returncode = None if times_out else returncode
+        self._stdout, self._stderr, self._times_out = stdout, stderr, times_out
+
+    def communicate(self, timeout: Optional[float] = None):
+        import subprocess
+
+        if self._times_out:
+            raise subprocess.TimeoutExpired(cmd="agent", timeout=timeout)
+        return self._stdout, self._stderr
+
+    def poll(self):
+        return self.returncode
+
+    def kill(self):
+        self.returncode = -9
+
+    def wait(self, timeout: Optional[float] = None):
+        return self.returncode
+
+
 def temporary_store_dir() -> str:
     """A throwaway directory for a redirected run store."""
     return tempfile.mkdtemp(prefix="orch_teststore_")

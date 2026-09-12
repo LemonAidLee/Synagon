@@ -1,4 +1,4 @@
-# Roadmap — from a pipeline to a delegation system
+# Synagon Roadmap — from a pipeline to a delegation system
 
 [ARCHITECTURE.md](ARCHITECTURE.md) describes the system **as it is**. This document describes
 where it is **going**, and why each step is the next one. It is deliberately separate so that
@@ -891,6 +891,25 @@ worth being able to find later.*
   real session. `node-pty` in the Electron shell itself remains open (§10.7's original
   reasoning) as a way to give a *native window* the same treatment, not as a gap in the
   browser-tab cockpit.
+* **Native TUI for Claude Code and Antigravity.** *Not supported, deliberately.* OpenCode is
+  the only agent with a supported programmatic native-TUI integration (its `serve` + `attach`
+  API); Claude Code and Antigravity have interactive CLIs but no supported way to deliver a
+  prompt to a running interactive session and detect that its turn finished, and driving one
+  by keystrokes or screen-scraping is ruled out. They run headless, visibly when configured,
+  and `agent_execution_mode: native_tui` refuses them at preflight (ARCHITECTURE.md §14). Revisit
+  only if either ships a supported control mechanism.
+* ~~**Surviving the orchestrator's own death (Package B).**~~ **Closed by Package C** on
+  Windows (ARCHITECTURE.md §14.5, §30.2c): every agent process is owned by a kill-on-close job
+  object, so a hard-killed orchestrator no longer orphans its agents (measured live, twice); the
+  execution in flight at a kill is recorded as an attempt with unknown spend rather than
+  vanishing; the wall-clock budget continues across resume. Still open: POSIX ownership, and
+  the IDE-owned tab (and, in native mode, its `attach` TUI) that a hard kill leaves behind.
+* **A live bridge run — done (Package C).** A full workflow ran through real integrated
+  terminals, OpenCode in its native TUI in an IDE tab, and left nothing running. The bridge's
+  port-takeover fix is installed; activating it needs an IDE window reload.
+* **Configuring the team from the cockpit — done (Package C).** Reassigning a role's agent and
+  adding or removing an agent now take effect in the running daemon, persist, and survive a
+  restart (ARCHITECTURE.md §22.5).
 * **A packaged app that carries its own Python.** Today `desktop/` runs the interpreter beside
   a checkout. Shipping an installer to someone who does not have the repository is a different
   problem, and not one this phase claimed to solve.

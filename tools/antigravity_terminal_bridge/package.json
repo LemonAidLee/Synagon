@@ -3,7 +3,7 @@
   "displayName": "Antigravity Integrated Terminal Bridge",
   "description": "Bridge extension allowing external orchestrators (LangGraph) to launch and control terminals inside Antigravity IDE",
   "version": "1.0.0",
-  "publisher": "project-beta",
+  "publisher": "synagon",
   "engines": {
     "vscode": "^1.68.0"
   },

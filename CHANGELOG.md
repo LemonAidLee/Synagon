@@ -2,6 +2,275 @@
 
 ## Unreleased
 
+### Package F — release readiness
+
+A cleanup and documentation pass over everything accumulated in Packages B–E, plus a real
+demonstration project. No architecture changed; every fix below is something a release
+checklist should have caught.
+
+- **A hardcoded personal path in shipped source.** `tools/install_terminal_bridge.py` fell back
+  to a literal `C:\Users\Asus\...` if `%LOCALAPPDATA%` didn't resolve. Removed; the fallback is
+  now `shutil.which`, same as every other optional-tool lookup in this project.
+- **A stale API-key template that contradicted this project's own architecture.** `.env.example`
+  listed `ANTHROPIC_API_KEY` / `GOOGLE_API_KEY` / `OPENAI_API_KEY` — nothing in `orchestrator/`
+  reads any of them; every agent is a local, already-authenticated CLI, by design (README,
+  invariant "Zero provider API keys"). Removed, along with `langchain-anthropic`,
+  `langchain-google-genai`, `langchain-openai` and `python-dotenv` from `requirements.txt`,
+  which existed only to support that unused path. `langgraph` itself stays — `graph.py` builds
+  its `StateGraph` from it.
+- **A local design-linter's cache directory (`.impeccable/`) was untracked but not ignored.**
+  Added to `.gitignore`; it holds this session's own tool state, not project source.
+- **Considered, then deliberately left alone: the built-in default's researcher pairing.** With
+  no `orchestrator.yaml` of your own, `DEFAULT_CONFIG` assigns the researcher role to
+  `antigravity / gemini-3.8-flash-high` — the exact pairing this project's own config moved away
+  from after measuring it return an empty response to an investigate-the-project prompt (see
+  "the researcher moved off Antigravity", below). Changing the fallback to match looked like a
+  one-line fix; it broke 15 tests across four files that pin the fallback's exact shape. Fixing
+  it well is a real (if small) design change — deciding what the fallback *should* demonstrate,
+  and updating every test that encodes it — not a release-readiness cleanup, so it was reverted
+  and documented instead: README, Known limitations, names the risk and the two ways around it
+  (write your own config, or ladder the researcher across providers).
+- **README gained the sections a release needs and did not have:** Prerequisites, a terminal
+  bridge install/reload walkthrough, an Execution modes table (headless / visible-headless /
+  native TUI, and exactly which agents support which), Troubleshooting, and Known limitations —
+  including a config-loading behavior worth knowing before you write your own `orchestrator.yaml`
+  (it fully replaces the built-in default rather than merging with it).
+- **`demo/`** — a reproducible, two-file throwaway project (`setup_demo_project.py` creates it;
+  never committed, `demo/scratch/` is git-ignored) with one deliberately failing test, small
+  enough to read the whole diff of, built to exercise Research → Planning → Implementation →
+  Verification → Acceptance end to end. `demo/README.md` covers reproducing it and the one flag
+  or extra invocation needed to see escalation, budget limits, resume, delegation, and process
+  cleanup on the same project.
+- **Live validation, and what it actually found.** Eight real runs against the demo project (real
+  Claude Code, OpenCode, and Antigravity CLIs; no mocks) surfaced a genuine first-run gotcha
+  neither README nor ARCHITECTURE.md had named: **OpenCode and Claude Code each deny every file
+  operation on a project directory neither has been used against before**, and a fully headless
+  run has no terminal to answer that first-run trust prompt — indistinguishable from a broken
+  pipeline until you know to look for it. Now documented in README (Troubleshooting) and in
+  `demo/README.md`. Working within that constraint, the same eight runs are honest evidence for
+  exactly the behaviors this release needed to demonstrate, with real token and timing numbers:
+  - **Retry with widening backoff** on an empty OpenCode reply, more than once (2.0s, then 4.0s).
+  - **Repair, on a genuine FAIL.** The acceptance gate (`pytest -q`, run by the orchestrator
+    itself) failed, the verifier agreed, and two repair attempts followed — 33.3s and 8.0s of
+    real implementer work — before the run correctly reported `Repair attempts: 2/2` and gave up
+    rather than loop forever.
+  - **Honest token accounting under failure.** A run whose implementer failed three attempts in a
+    row still reported every attempt's real cost (up to 162,861 tokens on one failed attempt
+    alone) rather than showing zero or guessing.
+  - **`BLOCKED`, not a false `PASS`, when no agent can proceed.** Once Claude Code's own
+    workspace-trust denial made every implementer attempt a no-op, the verifier correctly
+    reported `BLOCKED` with the specific human action needed, and spent zero of its repair budget
+    retrying something no amount of retrying could fix — invariants 2 and 7 holding under a real
+    failure, not a scripted one.
+  - **Process cleanup.** A run that changed nothing removed its own worktree and deleted the
+    branch it had created (`Cleanup: Worktree removed and its branch deleted: the run changed
+    nothing`); a run with real (if incomplete) changes committed them to the run's own branch and
+    reported exactly what to do to inspect or discard them.
+  - **Not reached live this pass:** a full green PASS end-to-end (blocked by the trust gotcha
+    above, compounded by an unrelated live outage on one OpenCode model, `opencode/gpt-5.1-codex`,
+    and by output flakiness on another, `opencode/big-pickle`, neither of which is a Synagon
+    defect), a cross-provider escalation ladder, and `--resume` — each is one documented flag or
+    invocation away on the same demo project (`demo/README.md`), just not spent here after eight
+    real runs had already answered the question this pass needed answered: does the reliability
+    machinery work under a real failure. It does.
+- **Offline suite: 1205 tests, unchanged pass rate.** Run twice around the changes above (before
+  and after), both `OK`, confirming none of this pass's edits touched tested behavior.
+
+### Package D — Synagon identity, and final polish
+
+The product identity moves from the working name "Project Beta" to **Synagon**. This is a
+branding and packaging pass, not an architecture change — every invariant and every module from
+Packages A–C is unchanged.
+
+- **The project folder rename is prepared but not yet applied.** The plan is
+  `D:\Progmata\Project Beta` → `D:\Progmata\Synagon`, and the whole tracked tree was searched
+  first for the old name and for hardcoded absolute paths: every entry point resolves
+  `project_root` dynamically (`os.getcwd()` / `--project-root` in `__main__.py`, `workspace.py`),
+  so nothing in the engine depends on the old path. The only hit was the terminal bridge's own
+  publisher id (below); a mocked path string in a test was left as `D:\Progmata\Project Beta`,
+  matching the folder as it exists today. The rename itself is deferred: attempting it live found
+  the folder held open by the running Antigravity IDE session (a file-watch handle Windows treats
+  as in-use), and forcing that closed was out of scope for this change. Whenever the folder *is*
+  renamed, pre-existing run records under `.orchestrator/runs/` will keep the old absolute path as
+  a historical fact (invariant 1: facts are stored, never rewritten) — resuming one of those runs
+  will degrade exactly the way `reattach_run_worktree` already handles a worktree that no longer
+  exists at its recorded path: it recreates the worktree from the branch instead of failing.
+- **The daemon's homepage (`cockpit.html`) carries the new identity.** `<title>`, the header
+  wordmark, and the boot-splash sequence now read SYNAGON, including a hand-built ASCII wordmark
+  (7-row dot-matrix, verified line-length-equal before embedding) in the same full-screen boot
+  overlay that used to just type "ORCHESTRATOR". The overlay's font-size is now
+  `clamp(7px, 2.3vw, 19px)` for the logo specifically, so it scales down instead of overflowing
+  at narrow window widths, and the logo is `aria-hidden` with the overlay itself carrying
+  `role="status" aria-label="Synagon daemon starting"` for anyone not seeing the art.
+- **The desktop shell and the terminal bridge extension follow.** `desktop/package.json`'s
+  `productName` and `appId`, and the window title in `main.js`, now say Synagon; the Antigravity
+  terminal bridge's VSIX publisher id moves from `project-beta` to `synagon` (its own extension
+  namespace, not a third-party identifier), and the committed `.vsix` was rebuilt from the
+  updated manifest.
+- **What did not change, on purpose.** The Python package (`orchestrator/`), the CLI invocation
+  (`python -m orchestrator`), `orchestrator.yaml`, and every internal module name stay exactly as
+  they are — renaming them would ripple through every import and test for no user-facing benefit.
+  Provider names (Antigravity, Claude Code, OpenCode) are untouched, per their own identities.
+
+### Package C — process ownership, honest spend across resume, configuration that takes effect
+
+Production hardening on top of Package B. Every fix was reproduced first - by execution, or by
+following the code path end to end - and each has a regression test in
+`tests/test_process_ownership.py` or `tests/test_package_c.py`. Evidence levels are those of
+ARCHITECTURE.md §30.2c; nothing below is called live that was mocked.
+
+- **A hard-killed orchestrator no longer leaves its agents running.** Every agent process -
+  headless, the daemon's captured and pty paths, the visible console runner, the OpenCode
+  native-TUI server, and the acceptance gate's command - is created suspended, placed in its own
+  Windows job object with kill-on-close, then resumed (`orchestrator/process_jobs.py`). The
+  kernel ends the job's processes when the orchestrator dies, however it dies. A job holds only
+  what was started into it; nothing is found by name. A retained native session is released so
+  it outlives the run on purpose; a runner hosted by Windows Terminal or the IDE bridge watches
+  the orchestrator's PID and stops its agent when it is gone. LIVE: the orchestrator killed with
+  `TerminateProcess` during the OpenCode implementer, twice - every process of the run gone
+  within 8 s (Package B measured `opencode.exe` surviving).
+- **An execution killed with the process is an attempt with unknown spend, not nothing.**
+  `resume.orphaned_attempts` also finds executions that started and never ended; the execution
+  that replaces one carries it as an `in_flight` attempt with unavailable usage, so the total is
+  shown as a floor (`Known tokens`, `N earlier tries`, `Budget: at least …`) - never estimated,
+  counted once across any number of resumes.
+- **The wall-clock budget spans the whole run.** A resumed run carries `prior_elapsed_seconds`
+  (its earlier sessions' working time, downtime excluded) and its time budget and reported
+  duration continue from it. Budgets report `tokens_complete` and `unreported_executions`.
+- **Reassigning a role in the daemon takes effect.** `POST /api/team` wrote the file, but the
+  daemon and its handler kept their startup configuration: the cockpit re-read the old team and
+  the next goal ran the old assignment until a restart. Both now re-read the file after a
+  successful save. LIVE on the real daemon, including a kill and restart.
+- **Agents can be added and removed.** The pipeline's `+ ADD AGENT` had no listener and the
+  Team pane had no add/remove; both now edit the one team draft, saved through the one route.
+- **An agent with no runner is never run as Claude.** `graph.get_runner` returned Claude for any
+  unknown name; it now raises `UnknownAgentError`, a phase failure that is not retried, and the
+  team editor names the missing runner (`config.RUNNABLE_AGENTS`).
+- **Every team save keeps its own backup.** Found live: saves within one second shared a backup
+  name, and the pre-edit file was overwritten.
+- **Icon sidebar.** Explorer, Team, Board and Terminals are inline-SVG icon buttons with
+  tooltips, `aria-label` and `aria-pressed`; the Board badge no longer rewrites its button.
+- **The offline suite cannot start an agent on a pty either.** `tests/__init__.py` now also
+  guards pywinpty's `PtyProcess.spawn`, the one process start that bypasses `Popen`.
+- **Known-issue cleanup.** Ghost worktree directories are removed (empty and unregistered
+  only); the file viewer's tokenizer compiles all its patterns once and all four are
+  compile-tested; `archive.py` uses `RUN_META_FILENAME`; verifier independence computes each
+  entry's rungs once.
+- **Live bridge run.** A full workflow on the Antigravity integrated-terminal bridge: three
+  runner tabs, OpenCode's native `attach` TUI in an IDE tab, `completed`/PASS, rows summing to
+  335,859, nothing left running. The bridge's port-takeover fix is installed (files identical to
+  source) and activates on the next IDE window reload - not done here, because it would have
+  ended this session.
+
+### Package B — reliability when things go wrong
+
+A validation pass over failure and recovery: success, retry, escalation, verifier FAIL, repair,
+budget, acceptance override, interruption, hard crash and resume, each driven through the real
+CLI entry point against throwaway git repositories. Every fix below was reproduced by execution
+first, and each has a regression test in `tests/test_reliability.py` that fails when the fix is
+switched off.
+
+- **A hard crash no longer loses a failed attempt's spend.** A failed attempt's usage lived only
+  on its `agent_retry` event until the phase produced its one result, and resume read results
+  alone: killed after a 700-token failed attempt, a run resumed to a total 700 lower than what
+  was paid. `resume.orphaned_attempts` recovers such attempts, and the execution that replaces
+  them carries them on its result (`interrupted: true`, shown as `(try N, before resume)`) —
+  counted once, and never again on a second resume.
+- **A crash mid-repair can no longer resume to a false `completed`.** Resume re-ran the
+  acceptance gate over the half-repaired workspace and paired its green result with the
+  *replayed* PASS of a verifier that had judged a red gate: status `completed`, repair neither
+  recorded nor verified. Gate results are now restored from the log, and a gate is replayed
+  exactly when the verification it fed is replayed (`resume.should_replay_gate`).
+- **Failed CLI runs keep the usage they reported.** Measured on this machine, Claude Code
+  2.1.267, agy 1.2.1 and OpenCode 1.18.29 all exit 1 on failure and still print their usage; the
+  headless adapters discarded it. It now travels on `CLIExecutionError.token_usage`, with the
+  CLI's own error message.
+- **Headless timeouts are enforced and leave no orphans.** Only the agent's own process was
+  killed: a grandchild holding its stdout made a 2-second timeout return after 25 s, and the
+  daemon's captured path returned on time but left the grandchild running. Both paths (and the
+  visible runner) now stop the whole process tree (`launcher.stop_tree`, `run_bounded`) on a
+  timeout or an interruption: measured after the fix, 2.3 s and 2.2 s, no survivors.
+- **Skill paths point into the worktree.** The skill manifest in every prompt named the user's
+  checkout — the same out-of-worktree trip Stage 7.5.2.1 fixed for "Project Root". Committed
+  skills are now shown at their worktree path; an untracked one is marked read-only.
+- **An unreachable terminal bridge is a preflight error.** With `terminal_type:
+  antigravity_integrated` and the bridge down, the first agent was launched and retried before
+  the run failed. Preflight now refuses it (not under the daemon, and not for `auto`), and a
+  bridge that answers but does not create the tab fails at once instead of after the timeout.
+- **The bridge extension survives its owning window closing.** Found live: the window holding
+  port 49182 closed, the other had given up on its only `EADDRINUSE`, and no window served the
+  bridge again. It now retries, and a window that never owned the port no longer deletes the
+  owner's port file. Needs a reinstall of the extension and an IDE reload to take effect.
+- **The cockpit counts every spend, once.** Cards now include failed attempts and every rung of
+  a ladder; the run total comes from the results (`cockpit.run_tokens`) instead of a sum of
+  cards, which counted identical ensemble members once per card.
+- **A run that ends in an error shows what it spent.** The CLI printed only "Pipeline Error".
+- **The offline suite cannot start a real agent.** Moving the launcher to `Popen` made adapter
+  tests that mocked `subprocess.run` start the real CLIs during one suite run (four `claude -p
+  "Test prompt"` sessions, no tools, no files changed; an OpenCode run killed by hand). Those
+  tests now mock `Popen`, and `tests/__init__.py` refuses to start `claude`, `agy` or `opencode`
+  unless `RUN_LIVE_TESTS=1`.
+- **Evidence.** Controlled (real CLI entry point, worktrees, gate, store, resume; scripted
+  agents with an independent token ledger): 17 of 17 scenarios. Live (real CLIs, scratch repos):
+  a normal run, a cross-model escalation from an unusable model, a gate-driven FAIL → repair →
+  PASS, a hard kill during the implementer followed by `--resume`, and OpenCode in native TUI on
+  a pty — each with summary rows summing exactly to the printed total, the checkout untouched,
+  and no agent process left behind by the orchestrator. Not validated live: the Antigravity
+  integrated-terminal bridge (down in this environment; cause identified above). See
+  ARCHITECTURE.md §30.2b.
+
+### Stage 7.5.2.1 — native TUI execution made correct, not just visible
+
+A reliability pass over the Stage 7.5.2 native-TUI path. Every change below fixes a defect that
+was reproduced by execution or measured on this machine (OpenCode 1.18.29), not one that was
+merely plausible.
+
+- **The "528-token discrepancy" was a report error, and is reconstructed from the logs.** The
+  Stage 7.5.2 walkthrough quoted Researcher 11,816 and Planner 629 beside a total of 53,239. The
+  run logs show two live runs: `task-2521` (11,816 / 629, then failed at the implementer) and
+  `task-2553` (12,232 / 741 / 36,948 / 3,318, whose own table printed Total 53,239). The report
+  mixed them: (12,232 − 11,816) + (741 − 629) = 528. The orchestrator summed correctly both times.
+- **A failed attempt's tokens are no longer lost.** The retry/escalation loop overwrote each
+  failed attempt's reported usage with the next attempt's, so after an escalation every total and
+  every budget decision was lower than what was paid — and the Antigravity failure mode §9.0
+  documents (`SUCCESS`, empty reply, a real bill for the thinking) is exactly that case. Failed
+  attempts now travel on the one `AgentResult` as `attempt_token_usage`, attributed to the rung
+  that spent them, shown as their own summary row, recorded on the `agent_retry` event, and
+  counted exactly once by metrics, budget, `--stats` and diagnostics (`types.result_token_rows`).
+- **One OpenCode token normalisation.** Headless and native mode read the same step-finish
+  numbers but normalised them differently (cached input in or out of `input_tokens`; reasoning
+  and cache-write tokens missing from native totals). `agents/opencode_usage.py` is now the only
+  normaliser, and native mode reads the session's step-finish parts — the same events headless
+  parses.
+- **Native completion detection fixed.** OpenCode's `retry` status (provider backoff) ended the
+  turn early; a turn that produced nothing was reported as a made-up success sentence, which
+  bypassed the empty-output retry; an error OpenCode recorded on the turn was ignored; and a
+  prompt naming an unusable model waited out the whole timeout. All four are fixed.
+- **No more orphaned OpenCode servers.** The native controller started the server through npm's
+  `opencode.CMD` shim, and terminating the shim left `opencode.exe` listening — one leaked server
+  per native execution. It now starts the real binary and stops the whole process tree.
+- **`agent_execution_mode` is deterministic and strict.** `native_tui` is refused at preflight for
+  any agent without a supported native TUI (Claude Code, Antigravity), is never retried, and
+  never falls back to headless; an unknown mode is an error instead of silently running headless.
+- **Terminal lifecycle is configurable:** `execution.close_terminal_on_completion` (default
+  `true`; this project's config sets `false`). When off, a finished native TUI session keeps its
+  server and TUI so its history can be inspected, bounded to 8 and closed with
+  `--close-sessions`; failures, timeouts and interruptions are always torn down; a kept server is
+  only ever stopped after proving it still owns its port. `--keep-terminals` sets it for one run.
+- **The daemon-path `attach` TUI is ended at teardown.** It does not exit when its server stops
+  (measured); `run_captured`/`run_captured_pty` take a `stop` event the controller sets.
+- **Agents are shown their worktree, not the user's checkout.** Found live: shown the checkout
+  as "Project Root", OpenCode read a file from there, left its worktree, and waited on its own
+  external-directory permission prompt until the timeout. An isolated run's context now names the
+  worktree and says the checkout is off-limits; a native timeout names any pending permission or
+  question it was waiting on.
+- **`tests/test_native_tui_reliability.py`** covers all of the above, including real captured
+  OpenCode payloads, a real process-tree stop and real `stop` events.
+- **Live validation** (isolated scratch repos, real CLI, OpenCode's real TUI on a pty): normal
+  run, genuine verifier FAIL → native repair → PASS, cross-rung escalation from an unusable model,
+  and hard-kill → resume all passed, with exact token invariants and no surviving OpenCode
+  process. The Antigravity bridge path was not exercised (bridge offline).
+
 ### Fixed — the run store held 141 runs that never happened
 
 For most of this project's life the test suite wrote real run records into the developer's own

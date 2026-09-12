@@ -1,9 +1,52 @@
 """SkillRegistry for managing discovered skills, generating compact manifests, and tracking references."""
 
+import os
 import re
 from typing import Dict, List, Optional
 
 from orchestrator.skills.types import SkillInfo
+
+
+def _within(path: str, root: str) -> bool:
+    try:
+        return os.path.commonpath([os.path.normcase(path), os.path.normcase(root)]) == os.path.normcase(root)
+    except ValueError:  # different drives
+        return False
+
+
+def rebase_skill_paths(
+    skills: Optional[List[SkillInfo]],
+    project_root: str,
+    working_directory: str,
+) -> List[SkillInfo]:
+    """Point the paths of project skills at the run's worktree instead of the user's checkout.
+
+    Skills are discovered from the project root, so their paths name the checkout - and those
+    paths go into every agent's prompt with an instruction to read them. In an isolated run
+    that sent agents out of their worktree, the way "Project Root" did before Stage 7.5.2.1
+    (OpenCode stops on its own external-directory permission prompt, and the checkout is what
+    invariant 3 protects). A skill committed to the project exists at the same relative path in
+    the worktree, so that path is used. One that does not (an untracked skill) keeps its path
+    and is marked ``outside_workspace`` so the manifest can say so. Skills from a search path
+    outside the project are untouched. Returns new records; the input is not modified.
+    """
+    rebased: List[SkillInfo] = []
+    root = os.path.abspath(project_root or "")
+    work = os.path.abspath(working_directory or "")
+    for skill in skills or []:
+        entry: SkillInfo = dict(skill)  # type: ignore[assignment]
+        location = str(entry.get("location") or "")
+        if root and work and os.path.normcase(root) != os.path.normcase(work) and location and _within(location, root) and not _within(location, work):
+            candidate = os.path.join(work, os.path.relpath(location, root))
+            if os.path.isdir(candidate):
+                entry["location"] = candidate
+                instructions = str(entry.get("instructions_path") or "")
+                if instructions and _within(instructions, root):
+                    entry["instructions_path"] = os.path.join(work, os.path.relpath(instructions, root))
+            else:
+                entry["outside_workspace"] = True  # type: ignore[typeddict-unknown-key]
+        rebased.append(entry)
+    return rebased
 
 
 def format_skill_manifest(skills: List[SkillInfo]) -> str:
@@ -36,6 +79,11 @@ def format_skill_manifest(skills: List[SkillInfo]) -> str:
             entry.append(f"   Instructions: {instructions}")
         if resources:
             entry.append(f"   Resources: {', '.join(resources)}")
+        if skill.get("outside_workspace"):
+            entry.append(
+                "   Note: this skill is not committed to the project, so it is not in your "
+                "worktree. Read it only; never write to its location."
+            )
 
         lines.append("\n".join(entry))
 

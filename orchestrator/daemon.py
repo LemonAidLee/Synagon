@@ -293,6 +293,25 @@ class Daemon:
         #: Live agent output (Phase 10). Empty until `capture_agent_output` is installed.
         self.terminals = TerminalRegistry()
 
+    def reload_config(self) -> bool:
+        """Re-read the configuration file after the team editor wrote it. Never raises.
+
+        The daemon outlives any one edit, and everything it does reads `self.config`: what the
+        cockpit draws, and - through `run_delegated_goal` - which agent the next goal runs for
+        each role. Holding the startup copy made a saved assignment invisible and ignored until
+        a restart (Package C). A goal already running keeps the configuration it started with;
+        the next one gets what is on disk. The file is the one source of truth; this only stops
+        the daemon from holding a stale copy of it.
+        """
+        from orchestrator.serve import reload_config
+
+        fresh = reload_config(self.project_root, self.config_path)
+        if fresh is None:
+            return False
+        self.config = fresh
+        self._touch()
+        return True
+
     # -- reading -----------------------------------------------------------
 
     def board(self) -> Dict[str, Any]:
@@ -335,7 +354,7 @@ class Daemon:
         One request rather than five: the page is a dashboard, and a dashboard assembled from
         five independently-timed polls shows five different moments at once.
         """
-        from orchestrator.cockpit import columns, needs_you, ready_to_merge
+        from orchestrator.cockpit import columns, needs_you, ready_to_merge, run_tokens
         from orchestrator.serve import latest_activity
         from orchestrator.teams import (
             catalog_from_config,
@@ -365,6 +384,8 @@ class Daemon:
             "columns": columns(
                 team, activity.get("events") or [], self.terminals.live_by_agent()
             ),
+            # The run's spend, from its results - not the sum of its cards (cockpit.run_tokens).
+            "run_tokens": run_tokens(activity.get("events") or []),
             "activity": {
                 key: value
                 for key, value in activity.items()
@@ -815,7 +836,9 @@ def make_daemon_handler(daemon: "Daemon", port: int):
         daemon.board,
         writable=True,
         config_path=daemon.config_path,
-        on_team_saved=None,
+        # A saved team must reach the daemon too, not only the page: the next goal it starts
+        # has to run the assignment that was just saved.
+        on_team_saved=lambda result: result.get("ok") and daemon.reload_config(),
     )
 
     class DaemonHandler(base):  # type: ignore[misc,valid-type]

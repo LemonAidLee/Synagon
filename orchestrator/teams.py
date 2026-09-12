@@ -40,6 +40,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import yaml
 
 from orchestrator.config import (
+    RUNNABLE_AGENTS,
     ConfigValidationError,
     get_max_repair_attempts,
     ladder_rungs,
@@ -338,6 +339,13 @@ def validate_team(team: Dict[str, Any], config: Optional[Dict[str, Any]] = None)
                     f"Agent {index}{where}: '{agent}' is not a provider in the model catalog."
                 )
                 continue
+            if agent not in RUNNABLE_AGENTS:
+                problems.append(
+                    f"Agent {index}{where}: '{agent}' is in the model catalog, but this "
+                    f"orchestrator has no runner for it (it can run: "
+                    f"{', '.join(RUNNABLE_AGENTS)})."
+                )
+                continue
             known = {str(m.get("id")) for m in catalog.get(agent, [])}
             if model and known and str(model) not in known:
                 problems.append(
@@ -521,6 +529,13 @@ def write_team(
     if backup:
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         backup_path = path.with_name(f"{path.name}.bak-{stamp}")
+        # Two saves inside one second (an edit, then an undo of it, from the cockpit) used to
+        # share a name, so the second copy overwrote the first - and the first was the only copy
+        # of the file as it was before any of it (found live, Package C). Never reuse a name.
+        suffix = 1
+        while backup_path.exists():
+            backup_path = path.with_name(f"{path.name}.bak-{stamp}-{suffix}")
+            suffix += 1
         try:
             shutil.copy2(path, backup_path)
             result["backup"] = str(backup_path)

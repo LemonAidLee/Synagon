@@ -1,7 +1,7 @@
-# AI Orchestrator
+# Synagon
 
-A multi-agent orchestrator built on [LangGraph](https://github.com/langchain-ai/langgraph). It
-drives **local command-line AI agents** — Antigravity, Claude Code, OpenCode — through a
+Synagon is a multi-agent orchestrator built on [LangGraph](https://github.com/langchain-ai/langgraph).
+It drives **local command-line AI agents** — Antigravity, Claude Code, OpenCode — through a
 research → plan → implement → verify loop, with automatic repair when verification fails.
 
 It uses no provider API keys. Every agent runs as a local subprocess against the CLI you have
@@ -253,6 +253,126 @@ id only means something next to the agent whose catalog defines it, and clamping
 list would quietly hand one to the wrong provider. Preflight probes every rung, not just the
 first: a fallback is only ever reached on a bad day, which is a bad day to find out its
 binary is missing.
+
+---
+
+## Prerequisites
+
+- **Python 3.11+** and **git** on `PATH`.
+- At least one locally-authenticated agent CLI: [Claude Code](https://claude.com/product/claude-code),
+  [OpenCode](https://opencode.ai), or Antigravity's `agy`. `--doctor` probes whichever ones your
+  `orchestrator.yaml` names and tells you which are missing — install and `<cli> auth login` (or
+  equivalent) before your first run, since Synagon reads no provider API key of its own.
+- **Node.js** only if you want the desktop shell (`desktop/`) or are rebuilding the terminal
+  bridge extension; the CLI and the browser cockpit need neither.
+- **`gh`** (GitHub CLI), already authenticated, only if you turn on `delivery.enabled` — nothing
+  pushes or opens a pull request without it.
+
+## Terminal bridge (Antigravity IDE)
+
+Only needed for `terminal_type: antigravity_integrated` — a visible or native-TUI run that opens
+its terminal as a tab inside the Antigravity IDE instead of a separate console window. Every
+other terminal type (`windows_terminal`, `console`, or headless with no visible terminal at all)
+needs none of this.
+
+```powershell
+python tools/install_terminal_bridge.py
+```
+
+This packages `tools/antigravity_terminal_bridge/` into a VSIX, installs it into the running IDE
+(`antigravity-ide --install-extension … --force`), and also copies it straight into
+`~/.antigravity-ide/extensions/` so it survives IDE restarts. **Reinstalling the extension does
+not update a window that already loaded it** — reload the IDE window (or restart it) afterwards
+for the change to take effect. The bridge listens on `127.0.0.1:49182`; only one IDE window can
+hold that port at a time, and if the window that owns it closes, another open window picks it up
+within a few seconds rather than leaving the bridge unreachable.
+
+## Execution modes
+
+Every agent can run **headless** (no visible window; this is the default and what the offline
+test suite always uses). Two things can be layered on top of that, and they are not the same
+capability:
+
+| Mode | What you see | Which agents |
+| --- | --- | --- |
+| Headless | Nothing — output is captured, not shown. | All. |
+| Visible headless (`visible_terminals: true`) | The agent's own headless CLI output, streamed live into its own titled terminal window (or IDE tab, with the bridge). | All. |
+| Native TUI (`agent_execution_mode: native_tui`, or `auto` when a surface exists) | The agent's actual interactive TUI, driven programmatically. | **OpenCode only** — it is the only CLI with a documented `serve`/`attach` API. Requesting this for Claude Code or Antigravity is refused at preflight, on purpose: there is no supported way to drive their interactive sessions, and this project does not screen-scrape or send keystrokes to fake it. |
+
+`--visible-terminals` sets the second on the command line for one run; `execution.close_terminal_on_completion: false` (or `--keep-terminals`) leaves a finished terminal or native session open afterwards for inspection, bounded to 8 kept sessions, closable with `--close-sessions`.
+
+## Troubleshooting
+
+- **`--doctor` fails for an agent.** It probes the exact binary, model and role your config
+  names; the failure message says which one. Fix the CLI's own auth/installation first — Synagon
+  never retries past a preflight failure.
+- **A run using `terminal_type: antigravity_integrated` fails immediately, before any agent
+  runs.** Preflight checks the bridge's health before starting anything. Install or reinstall the
+  bridge (above), and reload the IDE window — a stale, already-loaded copy is the usual cause.
+- **A native-TUI run for Claude Code or Antigravity is refused at preflight.** This is not a bug;
+  see the Execution modes table above. Switch that role to `headless` or `auto`, or move it to
+  OpenCode.
+- **A run seems to hang, then a retry message appears in the console.** That is
+  `execution.retry` stepping down a model ladder after an empty or failed attempt — expected
+  behavior for a flaky provider call, not a stuck process. Every attempt's cost is still recorded.
+- **The daemon or `--serve` opens a blank/unreachable page.** Both bind `127.0.0.1` only; check
+  nothing else already owns the port, and that you opened the URL the process itself printed (it
+  carries a per-launch token the page needs).
+- **Windows only:** OpenCode's native TUI uses `pywinpty`/ConPTY; if it is not installed, that one
+  capability degrades to headless rather than failing the run (`terminals.pty_available()`).
+- **An agent's every file operation is denied on a brand-new project directory** — OpenCode
+  reports "The user rejected permission to use this specific tool call"; Claude Code's verifier
+  correctly reports `BLOCKED` with "Human Action Required." Both CLIs trust a working directory
+  only after a person (or an explicitly permission-bypassing invocation) has used it at least
+  once; a fully headless first run has no terminal to answer that trust prompt, so every
+  read/edit is silently denied — and Synagon does not, and should not, silently pass a
+  permission-bypass flag on your behalf (that decision belongs to you, and to that CLI's own
+  security model, not to this orchestrator). Establish trust once, per directory, before your
+  first Synagon run against it:
+  - **OpenCode:** `opencode run --auto "<anything>"` once by hand (or open the directory once in
+    OpenCode's own TUI). Confirmed to persist across later headless runs.
+  - **Claude Code:** open the directory once in Claude Code's interactive CLI and accept its
+    workspace-trust prompt (or answer it yourself if you already know the risk, using its own
+    `--permission-mode` / `--dangerously-skip-permissions` flags — outside Synagon, at your own
+    judgment, never something this project sets for you).
+
+  This is genuinely worth knowing before your first run against a new project: it looks
+  identical to a broken pipeline (an implementer that changes nothing, over and over) and the
+  honest failure it produces — a `BLOCKED` verdict asking for human action, or a retried-then-
+  failed execution — is the system behaving exactly as designed (invariants 2 and 7), not a bug
+  to chase.
+
+## Known limitations
+
+- **The built-in default (no `orchestrator.yaml` of your own) assigns the researcher role to
+  `antigravity / gemini-3.8-flash-high`.** This project's own config moved that role to
+  `claude / sonnet` after measuring that pairing return an empty response — `status: SUCCESS`,
+  output budget spent entirely on thinking tokens — when asked to investigate a project, which is
+  precisely the researcher's job (see CHANGELOG, "the researcher moved off Antigravity"). The
+  fallback default was deliberately left as-is rather than changed to match, because the offline
+  suite pins the fallback's exact shape across 15 tests in four files; changing it is a larger,
+  riskier edit than this pass should make on its own judgment. If you have no `orchestrator.yaml`
+  yet, either write one (see Configuration above) and give the researcher role to `claude` or
+  `opencode`, or add an escalation ladder: `agent: [antigravity, claude]`, `model:
+  [gemini-3.8-flash-high, sonnet]`.
+- **A project's own `orchestrator.yaml` does not merge with the built-in default — it fully
+  replaces it.** Supplying one with only `agents:` overridden will fail validation (missing
+  `roles`), and supplying a `models:` block with only one provider drops the others' catalogs.
+  Copy the full file (or start from `--apply-team <template>`) rather than writing a partial
+  override.
+- **Native TUI is OpenCode-only**, by design — see Execution modes above. Claude Code and
+  Antigravity run headless or visible-headless; revisit only if either ships a supported way to
+  drive an interactive session programmatically.
+- **Process-tree kill-on-close is proven on Windows**, via job objects (`process_jobs.py`);
+  POSIX ownership of the same guarantee is not yet built.
+- **The desktop shell runs beside a Python checkout** — it spawns `python -m orchestrator
+  --daemon` from the project you open, and does not (yet) bundle its own Python interpreter for
+  someone without this repository.
+- **Collisions between parallel tasks are detected and reported, never auto-resolved.**
+  Reconciling two tasks that touched the same file is always a person's decision.
+- **A run's git history predates the project's current name.** Some historical commits and one
+  mocked test path reference this project's former working name; see `CHANGELOG.md` (Package D)
+  for why that is a recorded fact rather than something to scrub.
 
 ---
 
