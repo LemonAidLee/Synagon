@@ -268,6 +268,35 @@ binary is missing.
 - **`gh`** (GitHub CLI), already authenticated, only if you turn on `delivery.enabled` — nothing
   pushes or opens a pull request without it.
 
+## Provider account linking
+
+`--check-providers` (or the cockpit's **Settings** page, `/settings` on the daemon) checks
+whether `claude`, `opencode`, and `agy` are installed and, where officially supported
+non-interactively, signed in — without Synagon ever reading, storing, or transmitting a
+credential of any kind. It only runs commands each provider documents as safe: `claude
+--version`, `agy --version`, and `opencode auth list` (the one of the three with a real,
+documented, secret-free "who's signed in" command).
+
+```powershell
+python -m orchestrator --check-providers
+```
+
+Possible states per provider:
+
+| State | Meaning |
+| --- | --- |
+| Not installed | The binary isn't on `PATH`. |
+| Cannot be confirmed automatically | **Claude Code and `agy` always report this.** Neither CLI documents a non-interactive way to check sign-in status — Anthropic's and Google's own docs confirm it (see `docs/superpowers/specs/2026-09-12-package-g-provider-account-linking-design.md` for the citations). This is not an error; click **Login** (or run the CLI yourself) to verify. |
+| Not signed in / Verified | **OpenCode only.** `opencode auth list` genuinely reports which providers have stored credentials. |
+| Subscription: cannot be confirmed | Shown whenever authentication is confirmed — none of the three CLIs exposes quota/entitlement data through a documented non-interactive command, so this is never guessed at. |
+| CLI error / Timed out | The probe itself failed to run cleanly — worth a look, independent of your account. |
+
+**Login** opens the provider's own login flow in a normal terminal window — `claude` and `agy`
+plainly, `opencode auth login` for OpenCode's interactive provider picker — and Synagon does not
+wait for it or touch what it stores. This is the same zero-provider-API-key invariant the rest
+of this README describes, restated for account status specifically: Synagon links to your
+already-authenticated CLI, never to a credential it holds itself.
+
 ## Terminal bridge (Antigravity IDE)
 
 Only needed for `terminal_type: antigravity_integrated` — a visible or native-TUI run that opens
@@ -306,6 +335,9 @@ capability:
 - **`--doctor` fails for an agent.** It probes the exact binary, model and role your config
   names; the failure message says which one. Fix the CLI's own auth/installation first — Synagon
   never retries past a preflight failure.
+- **`--check-providers` (or the Settings page) says "cannot be confirmed automatically" for
+  claude or agy.** That is the honest answer, not a bug — see "Provider account linking" above.
+  Click Login, or run `claude`/`agy` yourself, to check.
 - **A run using `terminal_type: antigravity_integrated` fails immediately, before any agent
   runs.** Preflight checks the bridge's health before starting anything. Install or reinstall the
   bridge (above), and reload the IDE window — a stale, already-loaded copy is the usual cause.

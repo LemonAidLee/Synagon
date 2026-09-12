@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Package G — local AI provider account linking
+
+A read-only status check for whether `claude`, `opencode`, and `agy` are installed and (where
+officially documented non-interactively — OpenCode only) signed in, plus a way to launch each
+provider's own login flow. Synagon reads no credential of any kind; `claude` and `agy` honestly
+report "cannot be confirmed automatically" rather than guessing, since neither CLI documents a
+non-interactive auth-status command (verified against Anthropic's and Google's own docs — see
+`docs/superpowers/specs/2026-09-12-package-g-provider-account-linking-design.md`).
+
+- New `orchestrator/provider_auth.py`, `--check-providers`, and a cockpit **Settings** page
+  (`/settings`) with one card per provider and Login / Check again actions.
+
 ### Package F — release readiness
 
 A cleanup and documentation pass over everything accumulated in Packages B–E, plus a real
