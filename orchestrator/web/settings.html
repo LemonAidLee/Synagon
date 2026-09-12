@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="orchestrator-token" content="__ORCHESTRATOR_TOKEN__">
+    <title>SYNAGON — Settings</title>
+    <style>
+:root {
+    --bg: #1C1B19;
+    --panel: #2D2C29;
+    --green: #519F50;
+    --amber: #FBB829;
+    --red: #EF2F27;
+    --cyan: #0AAEB3;
+    --dim: #918175;
+    --text: #FCE8C3;
+    --text-dim: #BAA67F;
+}
+* { box-sizing: border-box; }
+body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Cascadia Code', 'Consolas', monospace;
+    padding: 24px;
+}
+h1 {
+    font-size: 18px;
+    letter-spacing: 2px;
+    color: var(--cyan);
+    margin: 0 0 4px 0;
+}
+p.subtitle {
+    color: var(--text-dim);
+    margin: 0 0 24px 0;
+    font-size: 13px;
+}
+a.back-link {
+    color: var(--cyan);
+    text-decoration: none;
+    font-size: 13px;
+}
+#provider-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 16px;
+    margin-top: 20px;
+}
+.provider-card {
+    background: var(--panel);
+    border: 1px solid #3a3936;
+    border-radius: 6px;
+    padding: 16px;
+}
+.provider-card h2 {
+    margin: 0 0 12px 0;
+    font-size: 15px;
+    color: var(--text);
+}
+.provider-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 13px;
+    margin: 6px 0;
+    gap: 12px;
+}
+.provider-row .label { color: var(--text-dim); }
+.state-authenticated { color: var(--green); }
+.state-auth_unverifiable, .state-not_authenticated, .state-auth_expired { color: var(--amber); }
+.state-not_installed, .state-cli_error, .state-timed_out, .state-provider_unavailable { color: var(--red); }
+.detail {
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-top: 8px;
+    line-height: 1.4;
+}
+.card-actions {
+    margin-top: 14px;
+    display: flex;
+    gap: 8px;
+}
+button {
+    background: var(--panel);
+    border: 1px solid var(--dim);
+    color: var(--text);
+    padding: 6px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 12px;
+}
+button:hover { border-color: var(--cyan); color: var(--cyan); }
+button:disabled { opacity: 0.5; cursor: default; }
+#error-banner {
+    display: none;
+    background: var(--red);
+    color: var(--bg);
+    padding: 8px 12px;
+    border-radius: 4px;
+    margin-bottom: 16px;
+    font-size: 13px;
+}
+    </style>
+</head>
+<body>
+    <a class="back-link" href="/cockpit">&larr; Cockpit</a>
+    <h1>PROVIDER ACCOUNTS</h1>
+    <p class="subtitle">
+        Whether each local AI provider CLI is installed and signed in under your own account.
+        Synagon never reads, stores, or transmits a credential of any kind — it only launches
+        each provider's own login flow and reads status from commands that provider documents
+        as safe and non-interactive.
+    </p>
+    <div id="error-banner"></div>
+    <div id="provider-cards">Loading…</div>
+
+    <script>
+    const TOKEN = (() => {
+        const meta = document.querySelector('meta[name="orchestrator-token"]');
+        const raw = meta ? meta.getAttribute('content') : '';
+        return (raw && raw.indexOf('__') !== 0) ? raw : '';
+    })();
+
+    const PROVIDER_LABELS = {
+        claude: 'Claude Code',
+        opencode: 'OpenCode',
+        antigravity: 'Antigravity (agy)',
+    };
+
+    const STATE_LABELS = {
+        authenticated: 'Verified',
+        auth_unverifiable: 'Cannot be confirmed automatically',
+        not_authenticated: 'Not signed in',
+        auth_expired: 'Login expired',
+        not_installed: 'Not installed',
+        provider_unavailable: 'Unavailable',
+        cli_error: 'CLI error',
+        timed_out: 'Timed out',
+    };
+
+    async function apiGet(path) {
+        const res = await fetch(path, { headers: { 'X-Orchestrator-Token': TOKEN } });
+        if (!res.ok) throw new Error(`API error: ${res.status}`);
+        return res.json();
+    }
+
+    async function apiControl(action, body) {
+        let endpoint = '/api/control/';
+        if (action === 'provider_login') endpoint = '/api/control/provider_login';
+        const res = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'X-Orchestrator-Token': TOKEN, 'Content-Type': 'application/json' },
+            body: JSON.stringify(body || {}),
+        });
+        return res.json();
+    }
+
+    function showError(message) {
+        const banner = document.getElementById('error-banner');
+        banner.textContent = message;
+        banner.style.display = message ? 'block' : 'none';
+    }
+
+    function renderCard(status) {
+        const label = PROVIDER_LABELS[status.provider] || status.provider;
+        const stateLabel = STATE_LABELS[status.auth_state] || status.auth_state;
+        const installedText = status.installed ? 'Yes' : 'No';
+        const subscriptionLine = status.subscription_detail
+            ? `<div class="provider-row"><span class="label">Subscription</span><span>${status.subscription_detail}</span></div>`
+            : '';
+        return `
+            <div class="provider-card" data-provider="${status.provider}">
+                <h2>${label}</h2>
+                <div class="provider-row"><span class="label">Installed</span><span>${installedText}</span></div>
+                <div class="provider-row"><span class="label">Authentication</span>
+                    <span class="state-${status.auth_state}">${stateLabel}</span></div>
+                ${subscriptionLine}
+                <div class="detail">${status.detail || ''}</div>
+                <div class="card-actions">
+                    <button data-action="login" data-provider="${status.provider}">Login</button>
+                    <button data-action="check" data-provider="${status.provider}">Check again</button>
+                </div>
+            </div>
+        `;
+    }
+
+    async function loadProviders() {
+        try {
+            const data = await apiGet('/api/providers');
+            const container = document.getElementById('provider-cards');
+            container.innerHTML = (data.providers || []).map(renderCard).join('');
+            showError('');
+        } catch (err) {
+            showError('Could not load provider status: ' + err.message);
+        }
+    }
+
+    document.getElementById('provider-cards').addEventListener('click', async (event) => {
+        const button = event.target.closest('button[data-action]');
+        if (!button) return;
+        const provider = button.getAttribute('data-provider');
+        if (button.getAttribute('data-action') === 'check') {
+            await loadProviders();
+            return;
+        }
+        button.disabled = true;
+        try {
+            const result = await apiControl('provider_login', { provider });
+            if (!result.ok) showError(result.error || 'Could not start login.');
+        } catch (err) {
+            showError('Could not start login: ' + err.message);
+        } finally {
+            button.disabled = false;
+        }
+    });
+
+    loadProviders();
+    </script>
+</body>
+</html>
