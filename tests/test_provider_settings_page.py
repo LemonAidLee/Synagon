@@ -22,7 +22,8 @@ class TestSettingsPageContent(unittest.TestCase):
         self.assertIn("/api/providers", self.page)
 
     def test_posts_to_the_login_control_action(self):
-        self.assertIn("/api/control/provider_login", self.page)
+        self.assertIn("'/api/control/' + action", self.page)
+        self.assertIn("apiControl('provider_login'", self.page)
 
     def test_has_a_container_for_provider_cards(self):
         self.assertIn('id="provider-cards"', self.page)

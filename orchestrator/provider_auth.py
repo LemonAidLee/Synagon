@@ -37,6 +37,10 @@ AUTH_AUTHENTICATED = "authenticated"
 #: exists to confirm sign-in state. Never conflate this with AUTH_AUTHENTICATED or
 #: AUTH_NOT_AUTHENTICATED - it is not a guess in either direction.
 AUTH_UNVERIFIABLE = "auth_unverifiable"
+#: Reserved for a provider name outside the three known ones, in the sense the design spec uses
+#: it - current code instead refuses an unknown provider through a different path (see
+#: `_resolve_executable` and `open_provider_login`'s `PROVIDERS` check), so no probe emits this
+#: today. Kept so a future provider that needs it doesn't need a new state name.
 AUTH_PROVIDER_UNAVAILABLE = "provider_unavailable"
 AUTH_CLI_ERROR = "cli_error"
 AUTH_TIMED_OUT = "timed_out"
@@ -49,7 +53,6 @@ SUBSCRIPTION_CONFIRMED_DETAIL = "Authentication verified; subscription status ca
 PROVIDERS = ("claude", "opencode", "antigravity")
 
 DEFAULT_TIMEOUT = 15
-DEFAULT_LOGIN_TIMEOUT = 15  # only used to bound resolving the executable before a login spawn
 
 _VERSION_ARGS = {
     "claude": ["--version"],
@@ -378,12 +381,19 @@ def format_provider_report(providers: List[ProviderAuthStatus], color: bool = Tr
 
 
 def _spawn_detached_terminal(cmd: List[str], cwd: str, title: str) -> None:
-    """Open `cmd` in its own terminal window and return immediately.
+    """Launch `cmd` detached from this process and return immediately.
+
+    On Windows this opens a real terminal window (`wt.exe` when available, else
+    `CREATE_NEW_CONSOLE`) so the person can see and use the login prompt. On POSIX there is no
+    portable "open a terminal window" primitive, so this instead starts `cmd` as a detached
+    background process, in its own session (`start_new_session=True`) and sharing no window of
+    its own - deliberately, so a Ctrl-C at the daemon's own terminal cannot SIGINT a login the
+    user left running.
 
     Deliberately not `orchestrator.launcher.run_agent_cli`: that helper waits for the launched
     process to exit and force-kills the whole tree past its timeout, which is right for an
     agent turn but wrong for an interactive login a person may leave open indefinitely (bare
-    `claude` opens an indefinite REPL). This starts the window, is not owned by the
+    `claude` opens an indefinite REPL). This starts the process, is not owned by the
     orchestrator's process-job machinery, and is never waited on or killed.
     """
     if sys.platform == "win32":
@@ -400,7 +410,7 @@ def _spawn_detached_terminal(cmd: List[str], cwd: str, title: str) -> None:
         create_new_console = 0x00000010
         subprocess.Popen(cmd, cwd=cwd, creationflags=create_new_console)
         return
-    subprocess.Popen(cmd, cwd=cwd)
+    subprocess.Popen(cmd, cwd=cwd, start_new_session=True)
 
 
 def open_provider_login(provider: str) -> Dict[str, Any]:

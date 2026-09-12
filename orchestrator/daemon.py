@@ -6,8 +6,9 @@ Everything ``--serve`` reads, plus three things a command that exits could never
 
 * **Control.** ``POST /api/control/start`` begins a delegated goal; ``cancel``, ``approve``,
   ``reject`` and ``deliver`` do from a click what ``--resume-goal``, ``--approve``,
-  ``--reject`` and ``--deliver`` do from a terminal. Each one calls exactly the module the
-  CLI calls.
+  ``--reject`` and ``--deliver`` do from a terminal, and ``provider_login`` opens a provider's
+  own login flow the same way ``--check-providers``' Login prompt would. Each one calls exactly
+  the module the CLI calls.
 * **A live stream.** ``GET /api/stream`` relays ``events.jsonl`` as server-sent events as they
   are appended, instead of making every watcher re-read the tail on a timer.
 * **Supervision.** Several goals can be open at once, each a Job with a state a UI can show,
@@ -1002,7 +1003,10 @@ def make_daemon_handler(daemon: "Daemon", port: int):
                     self._send(_json_bytes({"error": str(exc)}), "application/json", status=500)
                 return
             if route == "/api/providers":
-                self._send(_json_bytes(daemon.provider_status()), "application/json")
+                try:
+                    self._send(_json_bytes(daemon.provider_status()), "application/json")
+                except Exception as exc:
+                    self._send(_json_bytes({"error": str(exc)}), "application/json", status=500)
                 return
 
             if route == "/api/terminals":

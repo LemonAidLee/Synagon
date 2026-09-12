@@ -20,23 +20,17 @@ from orchestrator.provider_auth import (
     AUTH_PROVIDER_UNAVAILABLE,
     AUTH_TIMED_OUT,
     AUTH_UNVERIFIABLE,
-    check_antigravity_auth,
-    check_claude_auth,
-    redact,
-)
-
-from orchestrator.provider_auth import (  # noqa: F811 - extends the Task 1 import block
-    AUTH_AUTHENTICATED,
-    AUTH_CLI_ERROR,
-    AUTH_NOT_AUTHENTICATED,
-    AUTH_NOT_INSTALLED,
-    AUTH_TIMED_OUT,
-    AUTH_UNVERIFIABLE,
+    PROVIDERS,
     SUBSCRIPTION_CONFIRMED_DETAIL,
     _parse_opencode_auth_list,
+    _spawn_detached_terminal,
+    check_all_providers,
     check_antigravity_auth,
     check_claude_auth,
     check_opencode_auth,
+    format_provider_report,
+    open_provider_login,
+    providers_ok,
     redact,
 )
 
@@ -135,7 +129,7 @@ class TestClaudeVersionOnlyProbe(unittest.TestCase):
         args, kwargs = mock_run.call_args
         self.assertEqual(args[0], ["C:/bin/claude.exe", "--version"])
         self.assertFalse(kwargs["shell"])
-        self.assertIsNotNone(kwargs["stdin"])
+        self.assertEqual(kwargs["stdin"], subprocess.DEVNULL)
         self.assertEqual(kwargs["timeout"], 7)
 
 
@@ -276,15 +270,6 @@ class TestOpencodeAuthCheck(unittest.TestCase):
         self.assertNotIn("sk-ant-api03", status["detail"])
 
 
-from orchestrator.provider_auth import (  # noqa: F811 - extends the running import block
-    PROVIDERS,
-    check_all_providers,
-    format_provider_report,
-    open_provider_login,
-    providers_ok,
-)
-
-
 class TestCheckAllProviders(unittest.TestCase):
     def test_returns_all_three_in_a_fixed_order(self):
         with patch(
@@ -387,6 +372,24 @@ class TestOpenProviderLogin(unittest.TestCase):
             result = open_provider_login("claude")
         self.assertFalse(result["ok"])
         self.assertIn("no terminal available", result["error"])
+
+
+class TestSpawnDetachedTerminal(unittest.TestCase):
+    """Direct coverage of `_spawn_detached_terminal`'s own branch logic.
+
+    Every other test in this file mocks `_spawn_detached_terminal` away entirely, which is how
+    a missing `start_new_session=True` on the POSIX branch went unnoticed through six reviews -
+    see the design spec's amendment. This exercises the function itself instead.
+    """
+
+    def test_posix_branch_detaches_into_its_own_session(self):
+        with patch("orchestrator.provider_auth.sys.platform", "linux"), patch(
+            "orchestrator.provider_auth.subprocess.Popen"
+        ) as mock_popen:
+            _spawn_detached_terminal(["claude"], cwd="/tmp/project", title="Claude Login")
+        mock_popen.assert_called_once_with(
+            ["claude"], cwd="/tmp/project", start_new_session=True
+        )
 
 
 if __name__ == "__main__":

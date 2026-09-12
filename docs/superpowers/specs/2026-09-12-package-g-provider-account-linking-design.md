@@ -96,12 +96,23 @@ class ProviderAuthStatus(TypedDict, total=False):
   adjacent to "token"/"key"/"secret"). Defense-in-depth: none of the three commands above are
   documented to print a secret, but a status feature must not become the exception that proves
   the zero-credential-handling invariant wrong.
-- **`open_provider_login(provider, timeout=300)`**: resolves the executable, then calls
-  `orchestrator.launcher.run_agent_cli(cmd=[...], visible=True, timeout=300,
-  close_on_completion=False, agent=provider, role="login", title="<Provider> Login")` — reusing
-  the existing visible-terminal launch path instead of new spawn code. Commands:
-  `[claude_exe]` bare, `[opencode_exe, "auth", "login"]`, `[agy_exe]` bare. Returns as soon as the
-  terminal is launched; it does not wait for the human to finish signing in.
+- **`open_provider_login(provider)`**: resolves the executable, then opens it in its own detached
+  terminal window and returns immediately. Commands: `[claude_exe]` bare,
+  `[opencode_exe, "auth", "login"]`, `[agy_exe]` bare.
+
+  Amendment made during implementation planning: the original draft of this section called for
+  reusing `orchestrator.launcher.run_agent_cli(visible=True, ...)`. On closer reading of
+  `launcher.py`, that function blocks synchronously until the launched process exits, and — past
+  its `timeout` — force-kills the whole process tree (`stop_tree`). That's the right contract for
+  an agent turn, but wrong for an interactive login: bare `claude` opens an indefinite REPL, so a
+  user who leaves it open past the timeout would have their live Claude Code session killed by a
+  status check's login button. Instead, `open_provider_login` uses a small dedicated
+  `_spawn_detached_terminal(cmd, cwd, title)` helper (Windows Terminal via `wt.exe` when
+  available, else `CREATE_NEW_CONSOLE`; a plain detached `Popen` elsewhere) that starts the
+  window, is not owned or tracked by the orchestrator's process-job machinery, and is never
+  waited on or killed. This is still "launch the provider's normal login flow" exactly as
+  required — it just doesn't route through the agent-execution helper built for a different
+  lifecycle.
 - **`check_all_providers(timeout=15)`**: runs all three and returns a list of
   `ProviderAuthStatus`.
 

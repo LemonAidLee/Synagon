@@ -291,9 +291,10 @@ Possible states per provider:
 | Subscription: cannot be confirmed | Shown whenever authentication is confirmed — none of the three CLIs exposes quota/entitlement data through a documented non-interactive command, so this is never guessed at. |
 | CLI error / Timed out | The probe itself failed to run cleanly — worth a look, independent of your account. |
 
-**Login** opens the provider's own login flow in a normal terminal window — `claude` and `agy`
-plainly, `opencode auth login` for OpenCode's interactive provider picker — and Synagon does not
-wait for it or touch what it stores. This is the same zero-provider-API-key invariant the rest
+**Login** opens the provider's own login flow — in a normal terminal window on Windows, or a
+detached background process on POSIX — `claude` and `agy` plainly, `opencode auth login` for
+OpenCode's interactive provider picker — and Synagon does not wait for it or touch what it
+stores. This is the same zero-provider-API-key invariant the rest
 of this README describes, restated for account status specifically: Synagon links to your
 already-authenticated CLI, never to a credential it holds itself.
 

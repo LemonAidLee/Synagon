@@ -146,8 +146,7 @@ button:disabled { opacity: 0.5; cursor: default; }
     }
 
     async function apiControl(action, body) {
-        let endpoint = '/api/control/';
-        if (action === 'provider_login') endpoint = '/api/control/provider_login';
+        const endpoint = '/api/control/' + action;
         const res = await fetch(endpoint, {
             method: 'POST',
             headers: { 'X-Orchestrator-Token': TOKEN, 'Content-Type': 'application/json' },
@@ -162,12 +161,21 @@ button:disabled { opacity: 0.5; cursor: default; }
         banner.style.display = message ? 'block' : 'none';
     }
 
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text == null ? '' : String(text);
+        return div.innerHTML;
+    }
+
     function renderCard(status) {
         const label = PROVIDER_LABELS[status.provider] || status.provider;
         const stateLabel = STATE_LABELS[status.auth_state] || status.auth_state;
         const installedText = status.installed ? 'Yes' : 'No';
+        // status.detail and status.subscription_detail are the only fields on this page that
+        // ultimately come from a provider CLI's own stdout (via provider_auth.py), rather than
+        // from the orchestrator itself - escape them before they reach innerHTML.
         const subscriptionLine = status.subscription_detail
-            ? `<div class="provider-row"><span class="label">Subscription</span><span>${status.subscription_detail}</span></div>`
+            ? `<div class="provider-row"><span class="label">Subscription</span><span>${escapeHtml(status.subscription_detail)}</span></div>`
             : '';
         return `
             <div class="provider-card" data-provider="${status.provider}">
@@ -176,7 +184,7 @@ button:disabled { opacity: 0.5; cursor: default; }
                 <div class="provider-row"><span class="label">Authentication</span>
                     <span class="state-${status.auth_state}">${stateLabel}</span></div>
                 ${subscriptionLine}
-                <div class="detail">${status.detail || ''}</div>
+                <div class="detail">${escapeHtml(status.detail || '')}</div>
                 <div class="card-actions">
                     <button data-action="login" data-provider="${status.provider}">Login</button>
                     <button data-action="check" data-provider="${status.provider}">Check again</button>
