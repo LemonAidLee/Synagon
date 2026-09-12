@@ -62,6 +62,7 @@ from orchestrator.scheduler import format_goal_summary, run_goal
 from orchestrator.workspace import head_commit
 from orchestrator.metrics import format_summary_table, get_token_diagnostics, verify_token_aggregation_invariant
 from orchestrator.preflight import format_preflight_report, run_preflight
+from orchestrator.provider_auth import check_all_providers, format_provider_report, providers_ok
 from orchestrator.prune import (
     DEFAULT_MAX_AGE,
     DEFAULT_MERGED_MAX_AGE,
@@ -334,6 +335,16 @@ def main() -> int:
         dest="doctor",
         default=False,
         help="Probe every configured agent (binary, model, role) and exit without running a task.",
+    )
+    parser.add_argument(
+        "--check-providers",
+        action="store_true",
+        dest="check_providers",
+        default=False,
+        help=(
+            "Check whether claude, opencode, and agy are installed and, where officially "
+            "supported non-interactively, signed in. Reads no credential of any provider."
+        ),
     )
     parser.add_argument(
         "--deep-preflight",
@@ -812,6 +823,13 @@ def main() -> int:
         safe_print(format_preflight_report(report))
         safe_print("")
         return 0 if report.get("ok") else 1
+
+    # --- Provider account linking (Package G) ------------------------------
+    if args.check_providers:
+        report = check_all_providers()
+        safe_print("")
+        safe_print(format_provider_report(report))
+        return 0 if providers_ok(report) else 1
 
     # --- Run store browsing (Tier 1 #4) ------------------------------------
     if args.runs is not None:
