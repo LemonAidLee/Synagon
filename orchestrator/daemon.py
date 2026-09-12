@@ -320,6 +320,27 @@ class Daemon:
 
         return read_board(self.project_root, self.config)
 
+    def provider_status(self) -> Dict[str, Any]:
+        """Every local AI provider's account-linking status, for the settings page (Package G).
+
+        Reads no credential of any kind - see `provider_auth`'s module docstring. This is a
+        read, so it belongs with `board`/`cockpit`, not with the control actions below.
+        """
+        from orchestrator.provider_auth import check_all_providers
+
+        return {"providers": check_all_providers()}
+
+    def provider_login(self, provider: str) -> Dict[str, Any]:
+        """Open one provider's own login flow in a detached terminal (Package G).
+
+        Never waits on it and never touches whatever credential that flow ends up storing.
+        """
+        from orchestrator.provider_auth import open_provider_login
+
+        if not provider:
+            return {"ok": False, "error": "a provider was expected"}
+        return open_provider_login(provider)
+
     def jobs(self) -> List[Dict[str, Any]]:
         """Every job this daemon has supervised, newest first."""
         with self._lock:
@@ -471,6 +492,8 @@ class Daemon:
             )
         if verb == "deliver":
             return self.deliver(str(payload.get("card") or payload.get("id") or ""))
+        if verb == "provider_login":
+            return self.provider_login(str(payload.get("provider") or ""))
 
         return {"ok": False, "unknown": True, "error": "no control action '%s'" % verb}
 
@@ -930,6 +953,9 @@ def make_daemon_handler(daemon: "Daemon", port: int):
             if route in ("/design", "/design.html"):
                 self._page("design.html")
                 return
+            if route in ("/settings", "/settings.html"):
+                self._page("settings.html")
+                return
 
             # Vendored libraries, served from disk rather than from a CDN. This is the whole
             # of what makes a third-party animation engine allowable here: the daemon is a
@@ -974,6 +1000,9 @@ def make_daemon_handler(daemon: "Daemon", port: int):
                     self._send(_json_bytes(daemon.cockpit()), "application/json")
                 except Exception as exc:
                     self._send(_json_bytes({"error": str(exc)}), "application/json", status=500)
+                return
+            if route == "/api/providers":
+                self._send(_json_bytes(daemon.provider_status()), "application/json")
                 return
 
             if route == "/api/terminals":
