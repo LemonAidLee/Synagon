@@ -31,6 +31,7 @@ class _ProviderDaemonCase(unittest.TestCase):
 
     def tearDown(self):
         self.daemon.stopping.set()
+        self.daemon.capture_agent_output(False)
         self.server.shutdown()
         self.server.server_close()
 
