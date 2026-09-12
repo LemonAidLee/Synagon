@@ -173,6 +173,35 @@ class TestParseOpencodeAuthList(unittest.TestCase):
     def test_header_only_output_is_unparseable(self):
         self.assertIsNone(_parse_opencode_auth_list("PROVIDER   METHOD\n"))
 
+    def test_real_opencode_1_18_29_box_drawn_zero_credentials_output_is_zero_providers(self):
+        # Exact bytes captured from a real `opencode auth list` run (opencode 1.18.29, Windows)
+        # against a machine with zero stored credentials. Before the fix this was misparsed as
+        # three "providers" named after the ANSI-wrapped box-drawing characters themselves
+        # (`\x1b[90m┌\x1b[39m`, `\x1b[90m│\x1b[39m`, `\x1b[90m└\x1b[39m`), fabricating
+        # AUTH_AUTHENTICATED on a machine that is not authenticated at all.
+        stdout = (
+            b"\x1b[90m\xe2\x94\x8c\x1b[39m  Credentials \x1b[90m~\\.local\\share\\opencode\\auth.json\n"
+            b"\x1b[90m\xe2\x94\x82\x1b[39m\n"
+            b"\x1b[90m\xe2\x94\x94\x1b[39m  0 credentials\n\n"
+        )
+        stderr = b"\x1b[0m\r\n"
+        text = stdout.decode("utf-8") + stderr.decode("utf-8")
+        self.assertEqual(_parse_opencode_auth_list(text), [])
+
+    def test_ansi_escape_codes_are_stripped_before_parsing(self):
+        self.assertEqual(
+            _parse_opencode_auth_list("\x1b[32manthropic\x1b[0m\n\x1b[32mopencode\x1b[0m\n"),
+            ["anthropic", "opencode"],
+        )
+
+    def test_box_drawing_decoration_lines_are_skipped_even_with_real_providers_present(self):
+        # Future-proofing: a box-drawn UI that reports a NON-zero count must not let the
+        # decoration characters themselves be parsed as provider names alongside real ones.
+        self.assertEqual(
+            _parse_opencode_auth_list("┌ Credentials\n│ anthropic\n└ 2 credentials\n"),
+            ["anthropic"],
+        )
+
 
 class TestOpencodeAuthCheck(unittest.TestCase):
     def test_not_installed(self):
@@ -196,6 +225,29 @@ class TestOpencodeAuthCheck(unittest.TestCase):
         self.assertIn("anthropic", status["detail"])
         self.assertIn("opencode", status["detail"])
         self.assertEqual(status["subscription_detail"], SUBSCRIPTION_CONFIRMED_DETAIL)
+
+    def test_real_opencode_1_18_29_box_drawn_output_is_not_authenticated_not_fabricated(self):
+        # End-to-end reproduction of the live-validation bug via check_opencode_auth(), using the
+        # exact real subprocess bytes captured from opencode 1.18.29 with zero stored credentials.
+        stdout = (
+            b"\x1b[90m\xe2\x94\x8c\x1b[39m  Credentials \x1b[90m~\\.local\\share\\opencode\\auth.json\n"
+            b"\x1b[90m\xe2\x94\x82\x1b[39m\n"
+            b"\x1b[90m\xe2\x94\x94\x1b[39m  0 credentials\n\n"
+        )
+        stderr = b"\x1b[0m\r\n"
+        with patch(
+            "orchestrator.provider_auth.get_opencode_executable_path",
+            return_value="C:/bin/opencode.exe",
+        ), patch(
+            "orchestrator.provider_auth.subprocess.run",
+            return_value=_Completed(returncode=0, stdout=stdout, stderr=stderr),
+        ):
+            status = check_opencode_auth()
+        self.assertEqual(status["auth_state"], AUTH_NOT_AUTHENTICATED)
+        self.assertNotEqual(status["auth_state"], AUTH_AUTHENTICATED)
+        self.assertNotIn("\u250c", status["detail"])
+        self.assertNotIn("\u2502", status["detail"])
+        self.assertNotIn("\u2514", status["detail"])
 
     def test_not_authenticated_when_no_providers_configured(self):
         with patch(

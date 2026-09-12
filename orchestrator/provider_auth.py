@@ -244,8 +244,34 @@ def check_antigravity_auth(timeout: int = DEFAULT_TIMEOUT) -> ProviderAuthStatus
 #: than widen this list speculatively).
 _NO_PROVIDERS_MARKERS = ("no providers", "no authenticated providers", "not logged in", "no credentials")
 
-#: Line prefixes that mark a header/separator row rather than a provider entry.
-_SKIP_LINE_PREFIXES = ("provider", "-", "=")
+#: A real opencode install (verified against 1.18.29) renders its box-drawn UI summary as
+#: "0 credentials" rather than any of the string markers above - the digit zero, not the word
+#: "no". Checked as its own regex (case-insensitive, tolerant of surrounding whitespace) rather
+#: than folded into `_NO_PROVIDERS_MARKERS` since it is a pattern, not a literal substring.
+_ZERO_CREDENTIALS_RE = re.compile(r"\b0\s+credentials?\b", re.IGNORECASE)
+
+#: Standard ANSI CSI escape sequence (e.g. `\x1b[90m`, `\x1b[39m`, `\x1b[0m`) - colour/style
+#: codes a real terminal-facing CLI (opencode 1.18.29 included) wraps its box-drawn UI output in.
+#: Stripped before any parsing logic runs so these bytes can never end up mistaken for part of a
+#: provider name, nor leak into the `detail` field shown to users.
+_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+#: Line prefixes that mark a header/separator row rather than a provider entry. "credentials"
+#: covers the box-drawn UI's own header row ("Credentials ~/path/to/auth.json", decoration
+#: stripped) - the same section title `_NO_PROVIDERS_MARKERS`/`_ZERO_CREDENTIALS_RE` recognise
+#: when it appears with a "0" summary, but here skipped on its own merits as a header, not data.
+_SKIP_LINE_PREFIXES = ("provider", "-", "=", "credentials")
+
+#: Non-word characters (box-drawing glyphs, bullets, stray leading punctuation) a UI-styled CLI
+#: prefixes each output line with. Stripped from the front of every line before the header check
+#: and before a token is extracted, so a decorated row like "│ anthropic" recovers "anthropic"
+#: rather than the leading glyph itself becoming the (rejected) token.
+_LEADING_DECORATION_RE = re.compile(r"^[^\w]+")
+
+#: A bare "N credentials"/"N credential" line (opencode's box UI ends its output with one, e.g.
+#: "└  2 credentials") is a summary/count row, not a provider entry - skipped regardless of N,
+#: the same "fail closed" way `_ZERO_CREDENTIALS_RE` treats the N=0 case at the whole-output level.
+_CREDENTIALS_COUNT_LINE_RE = re.compile(r"^\d+\s+credentials?$", re.IGNORECASE)
 
 
 def _parse_opencode_auth_list(text: str) -> Optional[List[str]]:
@@ -255,21 +281,32 @@ def _parse_opencode_auth_list(text: str) -> Optional[List[str]]:
     each remaining non-header, non-blank line's first token is taken as a provider id; and if
     that leaves nothing at all (e.g. a header row with no data rows) this returns `None` so the
     caller reports a CLI error instead of silently claiming "not authenticated".
+
+    ANSI escape sequences are stripped first: a real opencode install renders `auth list` as a
+    colorized, box-drawn UI ("┌ Credentials ...", "│", "└  0 credentials") rather than plain
+    text, and without stripping, the escape codes and box-drawing characters would otherwise be
+    parsed as "provider names" - exactly the guessing this parser exists to refuse. Leading
+    decoration characters (the box-drawing glyphs themselves) are then stripped per-line, and any
+    resulting token with no alphanumeric content is rejected rather than accepted as a provider
+    id - defense in depth for box-drawn styles this exact parser hasn't seen yet.
     """
+    text = _ANSI_ESCAPE_RE.sub("", text)
     stripped = text.strip()
     if not stripped:
         return []
     lowered = stripped.lower()
-    if any(marker in lowered for marker in _NO_PROVIDERS_MARKERS):
+    if any(marker in lowered for marker in _NO_PROVIDERS_MARKERS) or _ZERO_CREDENTIALS_RE.search(lowered):
         return []
 
     providers: List[str] = []
     for line in stripped.splitlines():
-        line = line.strip()
+        line = _LEADING_DECORATION_RE.sub("", line.strip()).strip()
         if not line or line.lower().startswith(_SKIP_LINE_PREFIXES):
             continue
+        if _CREDENTIALS_COUNT_LINE_RE.match(line):
+            continue
         token = line.split()[0].rstrip(":")
-        if token:
+        if token and re.search(r"[A-Za-z0-9]", token):
             providers.append(token)
     return providers or None
 
