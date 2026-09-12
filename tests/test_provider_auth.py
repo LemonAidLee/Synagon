@@ -271,6 +271,25 @@ class TestOpencodeAuthCheck(unittest.TestCase):
             status = check_opencode_auth()
         self.assertEqual(status["auth_state"], AUTH_CLI_ERROR)
 
+    def test_nonzero_exit_with_ansi_colored_output_does_not_leak_escape_codes_into_detail(self):
+        # A real opencode install colorizes basically everything, error output included (see the
+        # stray "\x1b[0m\r\n" this module's own bug report captured on stderr in the *success*
+        # case). `_ANSI_ESCAPE_RE` must be applied to the text used for this branch's detail
+        # message too, not just inside `_parse_opencode_auth_list`.
+        with patch(
+            "orchestrator.provider_auth.get_opencode_executable_path",
+            return_value="C:/bin/opencode.exe",
+        ), patch(
+            "orchestrator.provider_auth.subprocess.run",
+            return_value=_Completed(
+                returncode=1, stdout=b"", stderr=b"\x1b[31merror: something broke\x1b[0m"
+            ),
+        ):
+            status = check_opencode_auth()
+        self.assertEqual(status["auth_state"], AUTH_CLI_ERROR)
+        self.assertNotIn("\x1b", status["detail"])
+        self.assertIn("error: something broke", status["detail"])
+
     def test_unparseable_output_is_a_cli_error_not_a_guess(self):
         with patch(
             "orchestrator.provider_auth.get_opencode_executable_path",

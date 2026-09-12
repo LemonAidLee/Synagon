@@ -336,7 +336,10 @@ def check_opencode_auth(timeout: int = DEFAULT_TIMEOUT) -> ProviderAuthStatus:
             f"Could not run 'opencode auth list': {exc}", started,
         )
 
-    text = _decode(completed.stdout) + _decode(completed.stderr)
+    # Stripped once, here, so every use of `text` below - this branch's error detail and the
+    # `_parse_opencode_auth_list` call - sees ANSI-free text. `_parse_opencode_auth_list` also
+    # strips it internally (idempotent, so harmless when called directly or with plain text).
+    text = _ANSI_ESCAPE_RE.sub("", _decode(completed.stdout) + _decode(completed.stderr))
     if completed.returncode != 0:
         return _status(
             "opencode", True, executable, AUTH_CLI_ERROR,
