@@ -218,9 +218,14 @@ DEFAULT_CONFIG: OrchestratorConfig = {
             {"id": "google/gemini-3-pro", "name": "Gemini 3 Pro via Google"},
             {"id": "custom/my-model", "name": "Custom / user-defined model"},
         ],
+        # Which model ids Codex accepts depends on the *auth mode*: measured on a ChatGPT
+        # account, `gpt-5.1-codex` and `gpt-5.1-codex-mini` are both refused with "not
+        # supported when using Codex with a ChatGPT account". Only ids confirmed to work
+        # under the ChatGPT login this project targets are listed. `codex doctor` reports
+        # the account's current model; omitting `model:` entirely uses that default and is
+        # the most portable choice.
         "codex": [
-            {"id": "gpt-5.1-codex", "name": "GPT-5.1 Codex (Codex CLI default)"},
-            {"id": "gpt-5.1-codex-mini", "name": "GPT-5.1 Codex Mini"},
+            {"id": "gpt-5.5", "name": "GPT-5.5 (Codex, ChatGPT account)"},
         ],
     },
     "agents": [

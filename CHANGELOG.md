@@ -31,6 +31,11 @@ vendor's own account system. Verified against `codex-cli 0.154.0`.
   this by AST inspection of both modules, so the prose promise cannot drift from the code.
 - **Not a native-TUI agent.** Codex has no documented `attach`-equivalent, so
   `agent_execution_mode: native_tui` refuses it, exactly as it refuses Claude and Antigravity.
+- **Model ids depend on the auth mode.** Measured on a ChatGPT account, `gpt-5.1-codex` and
+  `gpt-5.1-codex-mini` are refused with "not supported when using Codex with a ChatGPT
+  account"; `gpt-5.5` works. The catalog lists only ids confirmed under the ChatGPT login this
+  project targets, and a test keeps API-key-tier ids out of it. Omitting `model:` on a `codex`
+  entry uses the account default and is the most portable choice.
 - **The Codex/ChatGPT desktop app is not an integration target.** Its bundled `codex.exe` lives
   under `Program Files\WindowsApps`, which denies execution to other processes, and it
   publishes no app execution alias. Only the standalone CLI

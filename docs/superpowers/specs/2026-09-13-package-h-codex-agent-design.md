@@ -182,9 +182,28 @@ rather than at run time):
 
 ```yaml
 codex:
-  - id: gpt-5.1-codex        # Codex CLI default family
-  - id: gpt-5.1-codex-mini
+  - id: gpt-5.5              # measured working under this ChatGPT account
 ```
+
+### Model ids depend on the auth mode (measured 2026-09-14)
+
+This was got wrong once and is recorded so it is not repeated. The catalog was first seeded with
+`gpt-5.1-codex` and `gpt-5.1-codex-mini` on the strength of their plausible names. Both are
+**refused under a ChatGPT account**:
+
+```
+The 'gpt-5.1-codex' model is not supported when using Codex with a ChatGPT account.
+```
+
+returned as a `turn.failed` with exit 1. `gpt-5.5` succeeds. `codex doctor` reports the account's
+resolved model (`model  gpt-5.5 - openai`) and its auth mode (`auth mode  chatgpt`); there is no
+`codex models list` subcommand, so `doctor` plus a real `exec` are the only officially verifiable
+sources of a valid id.
+
+Because Synagon targets the ChatGPT login and never an API key, listing API-key-tier ids would
+offer a configuration guaranteed to fail at run time. A test asserts neither catalog contains
+them. Omitting `model:` on a `codex` entry is valid and uses the account default - the most
+portable choice, and the one to prefer when the account's tier is not known in advance.
 
 ## Login flow
 

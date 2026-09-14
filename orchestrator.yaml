@@ -539,11 +539,14 @@ models:
     # OpenAI's Codex CLI (`npm install -g @openai/codex`). Ids are the values the CLI's
     # own `-m/--model` flag accepts. The Codex/ChatGPT desktop app does NOT provide an
     # invokable `codex` command - only the standalone CLI is supported.
-    - id: gpt-5.1-codex
-      name: GPT-5.1 Codex (Codex CLI default)
-
-    - id: gpt-5.1-codex-mini
-      name: GPT-5.1 Codex Mini
+    #
+    # Which ids are accepted depends on the AUTH MODE. Measured on a ChatGPT account,
+    # `gpt-5.1-codex` and `gpt-5.1-codex-mini` are both refused with "not supported when
+    # using Codex with a ChatGPT account" - those are API-key-tier ids. Run `codex doctor`
+    # to see the model your account actually resolves to. Omitting `model:` on a codex
+    # entry uses the account default and is the most portable choice.
+    - id: gpt-5.5
+      name: GPT-5.5 (Codex, ChatGPT account)
 
 # ------------------------------------------------------------------------------
 # Role Definitions & Responsibilities

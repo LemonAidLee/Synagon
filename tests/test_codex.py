@@ -212,9 +212,9 @@ class TestRunCodex:
         with patch("orchestrator.agents.codex.get_codex_executable_path", return_value="codex"), \
              patch("orchestrator.agents.codex.run_agent_cli",
                    return_value=_ok_result(LIVE_SUCCESS)) as run:
-            run_codex("x", model="gpt-5.1-codex", working_dir="/tmp/wt")
+            run_codex("x", model="gpt-5.5", working_dir="/tmp/wt")
         cmd = run.call_args.kwargs["cmd"]
-        assert cmd[cmd.index("-m") + 1] == "gpt-5.1-codex"
+        assert cmd[cmd.index("-m") + 1] == "gpt-5.5"
         assert cmd[cmd.index("-C") + 1] == "/tmp/wt"
 
     def test_returns_text_by_default(self):
@@ -315,7 +315,24 @@ class TestCodexRegistry:
     def test_default_catalog_has_codex_models(self):
         from orchestrator.config import DEFAULT_CONFIG
         ids = [m["id"] for m in DEFAULT_CONFIG["models"]["codex"]]
-        assert "gpt-5.1-codex" in ids
+        assert "gpt-5.5" in ids
+
+    def test_catalog_lists_no_api_key_tier_model_ids(self):
+        """Measured on a ChatGPT account: `gpt-5.1-codex` and `gpt-5.1-codex-mini` are both
+        refused with "not supported when using Codex with a ChatGPT account". Synagon targets
+        the ChatGPT login, so listing ids that can only work under an API key would offer a
+        configuration that is guaranteed to fail at run time."""
+        import yaml
+        from orchestrator.config import DEFAULT_CONFIG
+
+        with open("orchestrator.yaml", encoding="utf-8") as handle:
+            shipped = yaml.safe_load(handle)
+
+        api_key_tier = {"gpt-5.1-codex", "gpt-5.1-codex-mini"}
+        for source, catalog in (("DEFAULT_CONFIG", DEFAULT_CONFIG["models"]["codex"]),
+                                ("orchestrator.yaml", shipped["models"]["codex"])):
+            ids = {m["id"] for m in catalog}
+            assert not (ids & api_key_tier), f"{source} offers API-key-only ids: {ids & api_key_tier}"
 
     def test_window_title_uses_proper_case(self):
         from orchestrator.launcher import get_terminal_title
@@ -337,7 +354,7 @@ class TestCodexRegistry:
         with open("orchestrator.yaml", encoding="utf-8") as handle:
             raw = yaml.safe_load(handle)
         ids = [m["id"] for m in raw["models"]["codex"]]
-        assert "gpt-5.1-codex" in ids
+        assert "gpt-5.5" in ids
 
     def test_codex_role_validates_against_shipped_config(self):
         import copy
@@ -351,7 +368,7 @@ class TestCodexRegistry:
             raw = yaml.safe_load(handle)
         cfg = copy.deepcopy(raw)
         cfg["agents"][1] = {
-            "agent": "codex", "model": "gpt-5.1-codex", "role": cfg["agents"][1]["role"],
+            "agent": "codex", "model": "gpt-5.5", "role": cfg["agents"][1]["role"],
         }
         path = os.path.join(tempfile.mkdtemp(), "orchestrator.yaml")
         with open(path, "w", encoding="utf-8") as handle:
