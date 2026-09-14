@@ -1,7 +1,7 @@
 # Synagon
 
 Synagon is a multi-agent orchestrator built on [LangGraph](https://github.com/langchain-ai/langgraph).
-It drives **local command-line AI agents** — Antigravity, Claude Code, OpenCode — through a
+It drives **local command-line AI agents** — Antigravity, Claude Code, OpenCode, Codex — through a
 research → plan → implement → verify loop, with automatic repair when verification fails.
 
 It uses no provider API keys. Every agent runs as a local subprocess against the CLI you have
@@ -260,7 +260,10 @@ binary is missing.
 
 - **Python 3.11+** and **git** on `PATH`.
 - At least one locally-authenticated agent CLI: [Claude Code](https://claude.com/product/claude-code),
-  [OpenCode](https://opencode.ai), or Antigravity's `agy`. `--doctor` probes whichever ones your
+  [OpenCode](https://opencode.ai), Antigravity's `agy`, or OpenAI's
+  [Codex CLI](https://www.npmjs.com/package/@openai/codex) (`npm install -g @openai/codex` — the
+  Codex/ChatGPT **desktop app** does not provide an invokable `codex` command; its bundled binary
+  sits under `WindowsApps`, which denies execution to other processes). `--doctor` probes whichever ones your
   `orchestrator.yaml` names and tells you which are missing — install and `<cli> auth login` (or
   equivalent) before your first run, since Synagon reads no provider API key of its own.
 - **Node.js** only if you want the desktop shell (`desktop/`) or are rebuilding the terminal
@@ -271,11 +274,11 @@ binary is missing.
 ## Provider account linking
 
 `--check-providers` (or the cockpit's **Settings** page, `/settings` on the daemon) checks
-whether `claude`, `opencode`, and `agy` are installed and, where officially supported
+whether `claude`, `opencode`, `agy`, and `codex` are installed and, where officially supported
 non-interactively, signed in — without Synagon ever reading, storing, or transmitting a
 credential of any kind. It only runs commands each provider documents as safe: `claude
---version`, `agy --version`, and `opencode auth list` (the one of the three with a real,
-documented, secret-free "who's signed in" command).
+--version`, `agy --version`, `opencode auth list`, and `codex login status` (the two of the four
+with a real, documented, secret-free "who's signed in" command).
 
 ```powershell
 python -m orchestrator --check-providers
@@ -287,14 +290,16 @@ Possible states per provider:
 | --- | --- |
 | Not installed | The binary isn't on `PATH`. |
 | Cannot be confirmed automatically | **Claude Code and `agy` always report this.** Neither CLI documents a non-interactive way to check sign-in status — Anthropic's and Google's own docs confirm it (see `docs/superpowers/specs/2026-09-12-package-g-provider-account-linking-design.md` for the citations). This is not an error; click **Login** (or run the CLI yourself) to verify. |
-| Not signed in / Verified | **OpenCode only.** `opencode auth list` genuinely reports which providers have stored credentials. |
-| Subscription: cannot be confirmed | Shown whenever authentication is confirmed — none of the three CLIs exposes quota/entitlement data through a documented non-interactive command, so this is never guessed at. |
+| Not signed in / Verified | **OpenCode and Codex.** `opencode auth list` reports which providers have stored credentials; `codex login status` reports whether an account is signed in and which mode it used. Measured against `codex-cli 0.154.0`: it answers on **stderr**, and exits **1** when signed out — a legitimate answer, not a probe failure. |
+| Subscription: cannot be confirmed | Shown whenever authentication is confirmed — none of the four CLIs exposes quota/entitlement data through a documented non-interactive command, so this is never guessed at. Codex reports the auth *mode* ("Logged in using ChatGPT"), which says how you signed in, **not** which plan you hold. |
 | CLI error / Timed out | The probe itself failed to run cleanly — worth a look, independent of your account. |
 
 **Login** opens the provider's own login flow — in a normal terminal window on Windows, or a
 detached background process on POSIX — `claude` and `agy` plainly, `opencode auth login` for
-OpenCode's interactive provider picker — and Synagon does not wait for it or touch what it
-stores. This is the same zero-provider-API-key invariant the rest
+OpenCode's interactive provider picker, `codex login` for Codex's own browser/device flow — and
+Synagon does not wait for it or touch what it stores. Codex's `--with-api-key` and
+`--with-access-token` flags are never passed: a credential piped in by Synagon is precisely what
+this invariant forbids. This is the same zero-provider-API-key invariant the rest
 of this README describes, restated for account status specifically: Synagon links to your
 already-authenticated CLI, never to a credential it holds itself.
 

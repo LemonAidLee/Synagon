@@ -8,6 +8,7 @@ from langgraph.graph import StateGraph, START, END
 
 from orchestrator.agents.antigravity import run_antigravity
 from orchestrator.agents.claude_code import run_claude_code
+from orchestrator.agents.codex import run_codex
 from orchestrator.agents.exceptions import NativeTUIUnavailableError
 from orchestrator.agents.opencode import EXECUTION_MODES, run_opencode
 from orchestrator.agents.verifier import (
@@ -485,6 +486,7 @@ def get_runner(agent_name: str) -> Callable:
     if agent_name == "antigravity": return mod.run_antigravity
     if agent_name == "claude": return mod.run_claude_code
     if agent_name == "opencode": return mod.run_opencode
+    if agent_name == "codex": return mod.run_codex
     # This used to return Claude for any name it did not know. A catalog may list a provider
     # there is no runner for, and preflight can be skipped, so a role assigned to one ran as
     # Claude and the run looked fine. The assignment is the user's; running someone else is not

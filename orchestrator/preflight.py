@@ -31,6 +31,7 @@ from typing import Any, Callable, Dict, List, Optional, TypedDict
 
 from orchestrator.agents.antigravity import get_antigravity_executable_path
 from orchestrator.agents.claude_code import get_claude_executable_path
+from orchestrator.agents.codex import get_codex_executable_path
 from orchestrator.agents.opencode import get_opencode_executable_path
 from orchestrator.config import (
     OrchestratorConfig,
@@ -48,6 +49,7 @@ AGENT_EXECUTABLE_RESOLVERS: Dict[str, Callable[[], str]] = {
     "antigravity": get_antigravity_executable_path,
     "claude": get_claude_executable_path,
     "opencode": get_opencode_executable_path,
+    "codex": get_codex_executable_path,
 }
 
 #: Arguments used to confirm a binary responds, in deep mode.
@@ -55,6 +57,7 @@ AGENT_VERSION_ARGS: Dict[str, List[str]] = {
     "antigravity": ["--version"],
     "claude": ["--version"],
     "opencode": ["--version"],
+    "codex": ["--version"],
 }
 
 

@@ -2,6 +2,43 @@
 
 ## Unreleased
 
+### Package H — Codex/ChatGPT as a fourth agent
+
+OpenAI's Codex CLI joins Antigravity, Claude Code, and OpenCode as a first-class Synagon agent,
+following the same local-CLI model: a locally installed binary, authenticated entirely by the
+vendor's own account system. Verified against `codex-cli 0.154.0`.
+
+- **New `orchestrator/agents/codex.py`** — `run_codex` runs `codex exec --json --color never
+  --skip-git-repo-check`, reusing `run_agent_cli` unchanged for timeouts, process-tree
+  ownership, terminal hosting, and tracing. Response text comes from `agent_message` items and
+  token usage from `turn.completed.usage`; a missing usage event reports *unavailable* rather
+  than zero, so schema drift can never fabricate a measurement.
+- **`codex` added to** the agent registry (`RUNNABLE_AGENTS`), the model catalog, `get_runner`,
+  preflight's resolvers and version probes, the launcher's window titles, `provider_auth`'s
+  `PROVIDERS`, and the `/settings` page. The daemon's `/api/providers` and `provider_login`
+  needed no change — both already iterate `PROVIDERS`.
+- **`check_codex_auth`** uses `codex login status`, an officially documented non-interactive
+  command — making Codex the second provider (with OpenCode) that can report a real signed-in
+  or signed-out verdict instead of "cannot be confirmed". Measured behaviour the probe depends
+  on: the answer arrives on **stderr** (stdout is empty), and signed-out exits **1**, which is
+  a legitimate answer rather than a probe failure.
+- **No subscription claim.** `codex login status` reports the auth *mode* ("Logged in using
+  ChatGPT") and no plan, quota, or entitlement, so subscription stays `unavailable` with the
+  same verbatim message Package G established.
+- **No credential handling, unchanged.** `~/.codex/auth.json` is never opened and its existence
+  is never treated as a signal; `OPENAI_API_KEY` is never read, set, forwarded, or logged; the
+  `codex login --with-api-key` / `--with-access-token` flags are never passed. A test enforces
+  this by AST inspection of both modules, so the prose promise cannot drift from the code.
+- **Not a native-TUI agent.** Codex has no documented `attach`-equivalent, so
+  `agent_execution_mode: native_tui` refuses it, exactly as it refuses Claude and Antigravity.
+- **The Codex/ChatGPT desktop app is not an integration target.** Its bundled `codex.exe` lives
+  under `Program Files\WindowsApps`, which denies execution to other processes, and it
+  publishes no app execution alias. Only the standalone CLI
+  (`npm install -g @openai/codex`) is supported; with just the desktop app installed, Synagon
+  reports `not_installed` and names the install command.
+
+Design: `docs/superpowers/specs/2026-09-13-package-h-codex-agent-design.md`.
+
 ### Package G — local AI provider account linking
 
 A read-only status check for whether `claude`, `opencode`, and `agy` are installed and (where

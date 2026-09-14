@@ -213,6 +213,8 @@ def get_terminal_title(
         agent_display = "Claude"
     elif agent_clean == "opencode":
         agent_display = "OpenCode"
+    elif agent_clean == "codex":
+        agent_display = "Codex"
     else:
         agent_display = agent.capitalize()
 

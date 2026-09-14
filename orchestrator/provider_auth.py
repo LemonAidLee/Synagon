@@ -22,6 +22,7 @@ from typing import Any, Dict, List, Optional, TypedDict
 
 from orchestrator.agents.antigravity import get_antigravity_executable_path
 from orchestrator.agents.claude_code import get_claude_executable_path
+from orchestrator.agents.codex import get_codex_executable_path
 from orchestrator.agents.opencode import get_opencode_executable_path
 
 # -- status states -------------------------------------------------------------------------
@@ -49,8 +50,10 @@ SUBSCRIPTION_UNAVAILABLE = "unavailable"
 #: Required verbatim by the design spec whenever auth_state == AUTH_AUTHENTICATED.
 SUBSCRIPTION_CONFIRMED_DETAIL = "Authentication verified; subscription status cannot be confirmed."
 
-#: The three CLIs this module knows how to probe, in a fixed, stable order.
-PROVIDERS = ("claude", "opencode", "antigravity")
+#: The CLIs this module knows how to probe, in a fixed, stable order. `codex` is appended
+#: last rather than inserted so no existing positional expectation - in a test, in the settings
+#: page's card order, in a stored report - shifts underneath Package H.
+PROVIDERS = ("claude", "opencode", "antigravity", "codex")
 
 DEFAULT_TIMEOUT = 15
 
@@ -58,6 +61,7 @@ _VERSION_ARGS = {
     "claude": ["--version"],
     "opencode": ["--version"],
     "antigravity": ["--version"],
+    "codex": ["--version"],
 }
 
 #: Argv appended to the resolved executable to open each provider's own login flow.
@@ -65,6 +69,7 @@ _LOGIN_ARGS: Dict[str, List[str]] = {
     "claude": [],
     "opencode": ["auth", "login"],
     "antigravity": [],
+    "codex": ["login"],
 }
 
 
@@ -159,6 +164,8 @@ def _resolve_executable(provider: str) -> str:
         return get_opencode_executable_path()
     if provider == "antigravity":
         return get_antigravity_executable_path()
+    if provider == "codex":
+        return get_codex_executable_path()
     raise FileNotFoundError(f"unknown provider '{provider}'")
 
 
@@ -366,10 +373,90 @@ def check_opencode_auth(timeout: int = DEFAULT_TIMEOUT) -> ProviderAuthStatus:
     )
 
 
+#: Measured against codex-cli 0.154.0. `codex login status` prints its answer to *stderr*
+#: (stdout is empty) and exits 1 when signed out - so the exit code alone is not the signal,
+#: and a non-zero exit here is a legitimate answer rather than a probe failure. Treating it the
+#: way `check_opencode_auth` correctly treats a non-zero `auth list` would misreport every
+#: signed-out user as a CLI error.
+#:
+#: Order matters when these are tested: "not logged in" contains "logged in", so the negative
+#: markers are always checked first.
+_CODEX_SIGNED_OUT_MARKERS = ("not logged in", "not signed in")
+_CODEX_SIGNED_IN_MARKERS = ("logged in", "signed in")
+
+
+def check_codex_auth(timeout: int = DEFAULT_TIMEOUT) -> ProviderAuthStatus:
+    """Codex: `codex login status` is an officially documented non-interactive status command.
+
+    With `opencode`, this is the second of the four providers with a real auth signal, so it
+    never needs AUTH_UNVERIFIABLE. It reports the auth *mode* the CLI gives it ("Logged in
+    using ChatGPT"), which says how the user authenticated - never that a paid plan is active.
+    Subscription stays `unavailable`: no non-interactive Codex command reports plan, quota, or
+    entitlement, so claiming one would be exactly the guess this module exists to refuse.
+
+    `~/.codex/auth.json` is never opened, and its mere existence is never treated as an auth
+    signal - the same refusal this module already applies to every other provider.
+    """
+    started = time.time()
+    try:
+        executable = get_codex_executable_path()
+    except Exception as exc:
+        return _status("codex", False, None, AUTH_NOT_INSTALLED, str(exc), started)
+
+    try:
+        completed = _run(executable, ["login", "status"], timeout)
+    except _ProbeTimeout:
+        return _status(
+            "codex", True, executable, AUTH_TIMED_OUT,
+            f"'codex login status' did not respond within {timeout}s.", started,
+        )
+    except _ProbeFailed as exc:
+        return _status(
+            "codex", True, executable, AUTH_CLI_ERROR,
+            f"Could not run 'codex login status': {exc}", started,
+        )
+
+    # Measured: the answer arrives on stderr and stdout is empty. Both are read so a future
+    # version that moves the line to stdout keeps working without a code change. ANSI is
+    # stripped defensively - this command emitted none when measured, but a parsed stream
+    # should never depend on that staying true.
+    text = _ANSI_ESCAPE_RE.sub("", _decode(completed.stdout) + _decode(completed.stderr)).strip()
+    lowered = text.lower()
+
+    if any(marker in lowered for marker in _CODEX_SIGNED_OUT_MARKERS):
+        return _status(
+            "codex", True, executable, AUTH_NOT_AUTHENTICATED,
+            "Codex is installed but no account is signed in. Click Login to sign in with your "
+            "own ChatGPT account.", started,
+        )
+
+    if any(marker in lowered for marker in _CODEX_SIGNED_IN_MARKERS):
+        # Report the CLI's own sentence rather than a rephrasing of it, picked out of any
+        # surrounding warning lines (a non-default CODEX_HOME emits one, measured).
+        signal = next(
+            (line.strip() for line in text.splitlines()
+             if any(marker in line.lower() for marker in _CODEX_SIGNED_IN_MARKERS)),
+            text.splitlines()[0] if text else "",
+        )
+        return _status(
+            "codex", True, executable, AUTH_AUTHENTICATED,
+            f"{signal} (reported by 'codex login status'). This confirms how you signed in, "
+            "not which plan you hold.", started,
+            subscription_state=SUBSCRIPTION_UNAVAILABLE,
+            subscription_detail=SUBSCRIPTION_CONFIRMED_DETAIL,
+        )
+
+    return _status(
+        "codex", True, executable, AUTH_CLI_ERROR,
+        f"Could not interpret 'codex login status' output: {text[:300]}", started,
+    )
+
+
 _CHECKERS = {
     "claude": check_claude_auth,
     "opencode": check_opencode_auth,
     "antigravity": check_antigravity_auth,
+    "codex": check_codex_auth,
 }
 
 

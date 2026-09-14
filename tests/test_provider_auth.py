@@ -342,7 +342,10 @@ class TestOpencodeAuthCheck(unittest.TestCase):
 
 
 class TestCheckAllProviders(unittest.TestCase):
-    def test_returns_all_three_in_a_fixed_order(self):
+    def test_returns_every_provider_in_a_fixed_order(self):
+        # Every resolver in PROVIDERS must be patched, including codex (Package H): an
+        # unpatched one falls through to the real binary on the developer's machine, and the
+        # probe then reports that machine's true state instead of the fixture's.
         with patch(
             "orchestrator.provider_auth.get_claude_executable_path",
             side_effect=FileNotFoundError("x"),
@@ -351,6 +354,9 @@ class TestCheckAllProviders(unittest.TestCase):
             side_effect=FileNotFoundError("x"),
         ), patch(
             "orchestrator.provider_auth.get_antigravity_executable_path",
+            side_effect=FileNotFoundError("x"),
+        ), patch(
+            "orchestrator.provider_auth.get_codex_executable_path",
             side_effect=FileNotFoundError("x"),
         ):
             report = check_all_providers()

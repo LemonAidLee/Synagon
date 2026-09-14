@@ -218,6 +218,10 @@ DEFAULT_CONFIG: OrchestratorConfig = {
             {"id": "google/gemini-3-pro", "name": "Gemini 3 Pro via Google"},
             {"id": "custom/my-model", "name": "Custom / user-defined model"},
         ],
+        "codex": [
+            {"id": "gpt-5.1-codex", "name": "GPT-5.1 Codex (Codex CLI default)"},
+            {"id": "gpt-5.1-codex-mini", "name": "GPT-5.1 Codex Mini"},
+        ],
     },
     "agents": [
         {
@@ -430,7 +434,7 @@ DEFAULT_DELIVERY_CONFIG: DeliveryConfig = {
 #: The agents this orchestrator has a runner for (`graph.get_runner`, `preflight`'s resolvers).
 #: The model catalog may list more providers; an entry naming one of those cannot run and is
 #: refused by the team editor and by preflight, and never silently run as a different agent.
-RUNNABLE_AGENTS = ("antigravity", "claude", "opencode")
+RUNNABLE_AGENTS = ("antigravity", "claude", "opencode", "codex")
 
 VALID_ISOLATION_MODES = ("auto", "worktree", "none")
 VALID_CONSENSUS_POLICIES = ("unanimous", "majority", "any")

@@ -1,7 +1,7 @@
 # Synagon — Architecture
 
 Synagon is a multi-agent orchestration framework built on **LangGraph**, coordinating local
-command-line AI agents (Antigravity, Claude Code, OpenCode) through non-interactive subprocess
+command-line AI agents (Antigravity, Claude Code, OpenCode, Codex) through non-interactive subprocess
 calls, with no provider API keys. Its engine is still the Python `orchestrator` package and
 `python -m orchestrator` CLI — those are internal technical identifiers, unchanged by the
 product's rename to Synagon (Package D).
@@ -53,7 +53,7 @@ Agent  →  Model  →  Role  →  Responsibility  →  AgentResult
 
 | Concept                  | Meaning                                                                                                                                                                           | Examples                                                          |
 | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| **Agent**          | The execution provider / binary. Owns subprocess mechanics, auth context, CLI flags.                                                                                              | `antigravity`, `claude`, `opencode`                         |
+| **Agent**          | The execution provider / binary. Owns subprocess mechanics, auth context, CLI flags.                                                                                              | `antigravity`, `claude`, `opencode`, `codex`                |
 | **Model**          | The engine selected from that provider, passed via the official`--model` flag and validated against the catalog. May be a **list**, forming an escalation ladder (§9.2). | `gemini-3.8-flash-high`, `sonnet`, `opencode/gpt-5.1-codex` |
 | **Role**           | The functional position in the pipeline. Determines which prompt is built and how the result is interpreted.                                                                      | `researcher`, `planner`, `implementer`, `verifier`        |
 | **Responsibility** | The instructions for that role, injected into the prompt from`orchestrator.yaml`.                                                                                               | "Verify the implementation… return PASS or FAIL"                 |
@@ -146,7 +146,9 @@ patches the module attribute — the tests would silently exercise the real CLIs
 A name it has no runner for raises `UnknownAgentError`, a phase failure that is never retried.
 It used to return Claude: a catalog may list a provider there is no runner for, preflight can be
 skipped, and a role assigned to one then ran as Claude while the run looked fine (Package C).
-`config.RUNNABLE_AGENTS` is the list, and a test pins it to preflight's resolvers.
+`config.RUNNABLE_AGENTS` is the list, and a test pins it to preflight's resolvers. Package H
+appended `codex` to it; new agents are appended rather than inserted so no stored record or
+positional expectation shifts underneath an existing install.
 
 ---
 
@@ -857,12 +859,14 @@ and that is exactly the class of error a corrupt dataset produces.
 ## 12. Token accounting
 
 ```text
-   Antigravity            Claude Code                 OpenCode
---output-format json   --output-format json    headless: `run --format json` step-finish events
-   payload["usage"]      payload["usage"]      native:   the same step-finish parts, via
-                                                         GET /session/<id>/message
-        │                     │                          └── opencode_usage.usage_from_step_tokens
-        └─────────────────────┼─────────────────────┘
+   Antigravity            Claude Code                OpenCode                       Codex
+--output-format json   --output-format json   headless: `run --format json`    `exec --json`
+   payload["usage"]      payload["usage"]               step-finish events   turn.completed
+                                              native:   the same parts, via        ["usage"]
+                                                GET /session/<id>/message
+        │                     │                          │                             │
+        │                     │       opencode_usage.usage_from_step_tokens            │
+        └─────────────────────┼──────────────────────────┴─────────────────────────────┘
                               ▼
       TokenUsage {input, output, total, cache_*, reasoning, available, raw_usage}
                               ▼
@@ -985,8 +989,11 @@ These are different things and the project never presents one as the other.
 | **OpenCode**    | **Supported native TUI.** Its official `serve` + `attach` client/server architecture lets the orchestrator drive a session over REST while the real interactive TUI shows it.               | `agents/opencode_tui.py`: `opencode serve` → `POST /session` → `opencode attach <url> -s <id>` in a terminal → `POST /session/<id>/prompt_async` → poll `GET /session/status` and the session's messages → collect text and step-finish usage → tear down. |
 | **Claude Code** | **Headless / visible fallback.** Its interactive TUI exists, but there is no supported programmatic way to deliver a prompt to a running interactive session and detect that its turn finished. | `claude -p --output-format json`, optionally inside a visible terminal.                                                                                                                                                                                                    |
 | **Antigravity** | **Headless / visible fallback.** `agy` exposes no server, session API, or attach mechanism.                                                                                                   | `agy -p --output-format json`, optionally inside a visible terminal.                                                                                                                                                                                                       |
+| **Codex**       | **Headless / visible fallback.** `codex` has an `app-server`, but no documented `attach`-equivalent that delivers a prompt to a *running interactive* session and reports its turn finished.   | `codex exec --json --color never --skip-git-repo-check`, optionally inside a visible terminal.                                                                                                                                                                             |
 
-`orchestrator.agents.NATIVE_TUI_AGENTS` is the one declaration of this (`{"opencode"}`). Nothing
+`orchestrator.agents.NATIVE_TUI_AGENTS` is the one declaration of this (`{"opencode"}` — Codex
+is deliberately absent, so `native_tui` refuses it the same way it refuses Claude and
+Antigravity). Nothing
 here reads a TUI's screen, sends it keystrokes, or parses its ANSI output: every decision comes
 from OpenCode's documented REST API, and the TUI is only ever shown to a person.
 
