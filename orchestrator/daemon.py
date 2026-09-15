@@ -1015,6 +1015,15 @@ def make_daemon_handler(daemon: "Daemon", port: int):
                 self._send(_json_bytes(load_preferences()), "application/json")
                 return
 
+            if route == "/api/settings":
+                from orchestrator.settings_patch import current_settings
+
+                try:
+                    self._send(_json_bytes(current_settings(daemon.config)), "application/json")
+                except Exception as exc:
+                    self._send(_json_bytes({"error": str(exc)}), "application/json", status=500)
+                return
+
             if route == "/api/terminals":
                 self._send(
                     _json_bytes({"terminals": daemon.terminals.listing()}), "application/json"
@@ -1245,6 +1254,22 @@ def make_daemon_handler(daemon: "Daemon", port: int):
                     )
                     return
                 self._send(_json_bytes({"ok": True, "preferences": updated}), "application/json")
+                return
+
+            if route == "/api/settings":
+                payload = self._read_json()
+                if payload is None:
+                    return
+                from orchestrator.settings_patch import write_settings
+
+                result = write_settings(
+                    daemon.project_root, daemon.config, payload, config_path=daemon.config_path
+                )
+                if result.get("ok"):
+                    daemon.reload_config()
+                self._send(
+                    _json_bytes(result), "application/json", status=200 if result.get("ok") else 400
+                )
                 return
 
             if not route.startswith("/api/control/"):

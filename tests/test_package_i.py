@@ -93,5 +93,69 @@ class TestPreferencesRoute(_SettingsDaemonCase):
         self.assertEqual(ctx.exception.code, 401)
 
 
+from orchestrator.config import load_config
+
+MINIMAL_YAML = """\
+agents:
+  - agent: opencode
+    model: opencode/gpt-5.1-codex
+    role: implementer
+
+  - agent: claude
+    model: sonnet
+    role: verifier
+
+max_repair_attempts: 2
+
+verification:
+  consensus: unanimous
+
+roles:
+  implementer:
+    responsibility: write the code
+  verifier:
+    responsibility: check the code
+"""
+
+
+class _SettingsWritableDaemonCase(_SettingsDaemonCase):
+    def setUp(self):
+        self.root = tempfile.mkdtemp(prefix="orch_pkgi_settings_")
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+        config_path = os.path.join(self.root, "orchestrator.yaml")
+        with open(config_path, "w", encoding="utf-8") as handle:
+            handle.write(MINIMAL_YAML)
+        self.config = load_config(config_path)
+        self.daemon = Daemon(self.root, self.config, token="t")
+        self.server = serve_daemon(
+            self.root, self.config, port=0, open_browser=False, serve_forever=False,
+            printer=lambda *_: None, daemon=self.daemon,
+        )
+        self.base = "http://127.0.0.1:%d" % self.server.server_address[1]
+        self.prefs_path = os.path.join(self.root, "preferences.json")
+        self._old_env = os.environ.get(preferences.PREFERENCES_ENV)
+        os.environ[preferences.PREFERENCES_ENV] = self.prefs_path
+        self.addCleanup(self._restore_env)
+
+
+class TestSettingsRoute(_SettingsWritableDaemonCase):
+    def test_get_returns_current_values(self):
+        status, body = self._get("/api/settings")
+        self.assertEqual(status, 200)
+        self.assertEqual(body["max_repair_attempts"], 2)
+
+    def test_post_patches_and_reloads(self):
+        status, body = self._post("/api/settings", {"execution.agent_execution_mode": "headless"})
+        self.assertEqual(status, 200)
+        self.assertTrue(body["ok"])
+        status, body = self._get("/api/settings")
+        self.assertEqual(body["execution.agent_execution_mode"], "headless")
+
+    def test_post_rejects_invalid_value(self):
+        status, body = self._post("/api/settings", {"max_repair_attempts": -1})
+        self.assertEqual(status, 400)
+        self.assertFalse(body["ok"])
+
+
 if __name__ == "__main__":
     unittest.main()
