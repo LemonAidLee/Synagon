@@ -295,7 +295,7 @@ h1, h2, h3, .panel-header, .tab {
 @keyframes blink { 50% { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .blinking-cursor { animation: none; } }
 
-.goal-controls select, .goal-controls button, .goal-controls a.primary-btn {
+.goal-controls select, .goal-controls button, .goal-controls a.primary-btn, .goal-controls a.settings-link {
     background: var(--bg);
     border: 1px solid var(--dim);
     color: var(--text);
@@ -313,6 +313,19 @@ h1, h2, h3, .panel-header, .tab {
 .goal-controls button.primary-btn:hover, .goal-controls a.primary-btn:hover {
     background: var(--green);
     color: var(--bg);
+}
+/* De-emphasized: the desktop shell's Settings menu is the primary way in now (see
+   desktop/main.js). This stays for anyone running the cockpit in a plain browser tab
+   (Roadmap Phases 8-10), which has no native menu bar to put Settings in - just quieter
+   than a primary-btn, since it is no longer the only door. */
+.goal-controls a.settings-link {
+    border-color: transparent;
+    color: var(--text-dim);
+}
+.goal-controls a.settings-link:hover, .goal-controls a.settings-link:focus-visible {
+    background: transparent;
+    border-color: var(--dim);
+    color: var(--cyan);
 }
 
 .app-middle {
@@ -916,7 +929,7 @@ body.terminals-hidden .terminals-area, body.terminals-hidden #splitter-terminals
                 <span style="position: absolute; right: 12px; font-size: 12px; color: var(--dim); user-select: none;">CTRL+ENTER EXECUTE</span>
             </div>
             <div class="goal-controls">
-                <a href="/settings" class="primary-btn" style="text-decoration:none; display:inline-flex; align-items:center;">SETTINGS</a>
+                <a href="/settings" class="settings-link" style="text-decoration:none; display:inline-flex; align-items:center;" title="Provider account settings">SETTINGS</a>
                 <select id="theme-select" style="font-size: 15px">
                     <option value="theme-srcery">THEME: SRCERY</option>
                     <option value="theme-miasma">THEME: MIASMA</option>

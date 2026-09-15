@@ -302,6 +302,15 @@ function buildMenu() {
       ],
     },
     { role: "windowMenu" },
+    {
+      label: "Settings",
+      submenu: [
+        {
+          label: "Provider Accounts…",
+          click: (_item, window) => window && window.loadURL(urlFor(window, "/settings")),
+        },
+      ],
+    },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }

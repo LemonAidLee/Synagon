@@ -36,11 +36,61 @@ class TestSettingsPageContent(unittest.TestCase):
         for provider in ("claude", "opencode", "antigravity"):
             self.assertIn(provider, self.page)
 
+    def test_names_codex_in_script(self):
+        self.assertIn("codex", self.page)
+
+    def test_uses_a_two_column_grid_on_wide_screens(self):
+        """Four cards must form a 2x2 grid, not a 3-then-1 layout that strands Codex alone."""
+        self.assertIn("repeat(2, minmax(0, 1fr))", self.page)
+
+    def test_stacks_to_one_column_on_narrow_screens(self):
+        self.assertIn("@media (max-width: 640px)", self.page)
+        self.assertIn("grid-template-columns: 1fr", self.page)
+
+    def test_cards_pin_actions_to_a_shared_bottom_edge(self):
+        """So Login/Check again line up even when one card's text is much longer."""
+        self.assertIn(".card-actions {", self.page)
+        self.assertIn("margin-top: auto", self.page)
+
+    def test_subscription_text_is_not_squeezed_into_a_label_value_row(self):
+        """Codex's longer subscription sentence must wrap as its own paragraph, not fight a
+        flex row for space the way a short Installed/Authentication value can."""
+        self.assertIn("subscription-block", self.page)
+
+    def test_focus_visible_styling_present(self):
+        self.assertIn(":focus-visible", self.page)
+
 
 class TestCockpitLinksToSettings(unittest.TestCase):
     def test_cockpit_header_links_to_settings(self):
         page = (WEB_DIR / "cockpit.html").read_text(encoding="utf-8")
         self.assertIn('href="/settings"', page)
+
+    def test_header_settings_link_is_de_emphasized(self):
+        """The desktop shell's Settings menu (desktop/main.js) is the primary way in now; the
+        header link stays only for a plain-browser-tab cockpit, so it must no longer use the
+        same heavy primary-btn treatment as START."""
+        page = (WEB_DIR / "cockpit.html").read_text(encoding="utf-8")
+        self.assertIn('class="settings-link"', page)
+        self.assertNotIn('href="/settings" class="primary-btn"', page)
+
+
+class TestDesktopSettingsMenu(unittest.TestCase):
+    def setUp(self):
+        desktop_main = WEB_DIR.parent.parent / "desktop" / "main.js"
+        self.source = desktop_main.read_text(encoding="utf-8")
+
+    def test_settings_menu_item_exists(self):
+        self.assertIn('label: "Settings"', self.source)
+
+    def test_settings_menu_opens_the_settings_route(self):
+        self.assertIn('urlFor(window, "/settings")', self.source)
+
+    def test_settings_menu_follows_window_menu(self):
+        """Placed after Window, per the design brief."""
+        window_menu_pos = self.source.index('{ role: "windowMenu" }')
+        settings_pos = self.source.index('label: "Settings"')
+        self.assertLess(window_menu_pos, settings_pos)
 
 
 if __name__ == "__main__":
