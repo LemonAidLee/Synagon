@@ -4,56 +4,147 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="orchestrator-token" content="__ORCHESTRATOR_TOKEN__">
+    <link rel="stylesheet" href="/shared/theme.css">
     <title>SYNAGON — Settings</title>
     <style>
 :root {
-    --bg: #1C1B19;
-    --panel: #2D2C29;
-    --green: #519F50;
-    --amber: #FBB829;
-    --red: #EF2F27;
-    --cyan: #0AAEB3;
-    --dim: #918175;
-    --text: #FCE8C3;
-    --text-dim: #BAA67F;
+    --font: 'Cascadia Code', 'Consolas', monospace;
 }
 * { box-sizing: border-box; }
 body {
     margin: 0;
     background: var(--bg);
     color: var(--text);
-    font-family: 'Cascadia Code', 'Consolas', monospace;
+    font-family: var(--font);
     padding: 24px;
 }
-/* A settings pane reads as a finished, deliberate part of the app when it sits at a
-   comfortable reading width instead of stretching edge-to-edge with the window - the same
-   reason native preference panes don't grow wider just because their host window did. */
-.page {
-    max-width: 900px;
-    margin: 0 auto;
-}
-h1 {
-    font-size: 18px;
-    letter-spacing: 2px;
-    color: var(--cyan);
-    margin: 0 0 4px 0;
-}
-p.subtitle {
-    color: var(--text-dim);
-    margin: 0 0 24px 0;
-    font-size: 13px;
-    line-height: 1.5;
-}
-a.back-link {
-    color: var(--cyan);
-    text-decoration: none;
-    font-size: 13px;
-}
+body.density-compact .settings-group { padding: 10px 14px; margin-bottom: 10px; }
+body.density-compact .field-row { margin: 6px 0; }
+body.reduced-motion * { transition: none !important; animation: none !important; }
+
+.page { max-width: 900px; margin: 0 auto; }
+h1 { font-size: 18px; letter-spacing: 2px; color: var(--cyan); margin: 0 0 4px 0; }
+p.subtitle { color: var(--text-dim); margin: 0 0 20px 0; font-size: 13px; line-height: 1.5; }
+a.back-link { color: var(--cyan); text-decoration: none; font-size: 13px; }
 a.back-link:hover, a.back-link:focus-visible { text-decoration: underline; }
 
-/* Two per row on a normal desktop width so four cards form a balanced 2x2 grid instead of
-   a lone card stranded under a row of three. Below 640px - a phone-width browser tab, or a
-   narrowed window - a single column stacks cleanly. */
+.tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    border-bottom: 1px solid var(--dim);
+    margin: 16px 0 24px 0;
+}
+.tab-btn {
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--text-dim);
+    padding: 8px 12px;
+    font-family: inherit;
+    font-size: 12px;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    cursor: pointer;
+}
+.tab-btn:hover { color: var(--text); }
+.tab-btn.active { color: var(--cyan); border-bottom-color: var(--cyan); }
+.tab-btn:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+
+.settings-group {
+    background: var(--panel);
+    border: 1px solid #3a3936;
+    border-radius: 6px;
+    padding: 16px 20px;
+    margin-bottom: 16px;
+}
+.settings-group h2 {
+    margin: 0 0 14px 0;
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-dim);
+}
+.field-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    margin: 10px 0;
+    font-size: 13px;
+}
+.field-row .field-label { flex: 1; }
+.field-row .field-label .hint {
+    display: block;
+    color: var(--text-dim);
+    font-size: 11px;
+    margin-top: 2px;
+}
+.field-row select, .field-row input[type="text"], .field-row input[type="number"] {
+    background: var(--bg);
+    border: 1px solid var(--dim);
+    color: var(--text);
+    padding: 5px 8px;
+    border-radius: 4px;
+    font-family: inherit;
+    font-size: 12px;
+    min-width: 160px;
+}
+.field-row input[type="checkbox"] { width: 16px; height: 16px; }
+button {
+    background: var(--panel);
+    border: 1px solid var(--dim);
+    color: var(--text);
+    padding: 6px 14px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 12px;
+}
+button:hover { border-color: var(--cyan); color: var(--cyan); }
+button:disabled { opacity: 0.5; cursor: default; }
+button.primary { border-color: var(--green); color: var(--green); }
+button.primary:hover { background: var(--green); color: var(--bg); }
+button.danger { border-color: var(--red); color: var(--red); }
+button.danger:hover { background: var(--red); color: var(--bg); }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible {
+    outline: 2px solid var(--cyan);
+    outline-offset: 2px;
+}
+.save-status { font-size: 12px; color: var(--text-dim); margin-left: 8px; }
+.save-status.ok { color: var(--green); }
+.save-status.err { color: var(--red); }
+.unavailable-note {
+    font-size: 12px;
+    color: var(--text-dim);
+    font-style: italic;
+    margin: 10px 0;
+}
+pre.report {
+    background: var(--bg);
+    border: 1px solid var(--dim);
+    border-radius: 4px;
+    padding: 12px;
+    font-size: 12px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 400px;
+    overflow-y: auto;
+}
+#error-banner {
+    display: none;
+    background: var(--red);
+    color: var(--bg);
+    padding: 8px 12px;
+    border-radius: 4px;
+    margin-bottom: 16px;
+    font-size: 13px;
+}
+
+/* Carried over from the provider-accounts page this tab used to be the whole of. */
 #provider-cards {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -63,7 +154,6 @@ a.back-link:hover, a.back-link:focus-visible { text-decoration: underline; }
 @media (max-width: 640px) {
     #provider-cards { grid-template-columns: 1fr; }
 }
-
 .provider-card {
     background: var(--panel);
     border: 1px solid #3a3936;
@@ -72,13 +162,8 @@ a.back-link:hover, a.back-link:focus-visible { text-decoration: underline; }
     padding: 18px 20px;
     display: flex;
     flex-direction: column;
-    /* A floor, not a ceiling: Codex's longer subscription note and detail paragraph make
-       its card taller than the others, and that's fine - this just keeps a short card
-       (nothing but Installed/Authentication) from looking empty next to it. */
     min-height: 220px;
 }
-/* Same left-accent-bar convention the cockpit already uses for board cards and toasts
-   (.board-card, .toast), reused here instead of inventing a new status idiom. */
 .provider-card.accent-authenticated { border-left-color: var(--green); }
 .provider-card.accent-auth_unverifiable,
 .provider-card.accent-not_authenticated,
@@ -87,13 +172,13 @@ a.back-link:hover, a.back-link:focus-visible { text-decoration: underline; }
 .provider-card.accent-provider_unavailable,
 .provider-card.accent-cli_error,
 .provider-card.accent-timed_out { border-left-color: var(--red); }
-
 .provider-card h2 {
     margin: 0 0 14px 0;
     font-size: 16px;
     font-weight: 700;
     letter-spacing: 0.5px;
     color: var(--text);
+    text-transform: none;
 }
 .provider-row {
     display: flex;
@@ -110,11 +195,6 @@ a.back-link:hover, a.back-link:focus-visible { text-decoration: underline; }
 .state-authenticated { color: var(--green); }
 .state-auth_unverifiable, .state-not_authenticated, .state-auth_expired { color: var(--amber); }
 .state-not_installed, .state-cli_error, .state-timed_out, .state-provider_unavailable { color: var(--red); }
-
-/* Subscription is a caveat about the authentication line above it, not a peer status of its
-   own - stacked (caption over text) rather than squeezed into a label/value row, so its
-   longer sentence (Codex's, especially) wraps as a normal paragraph instead of fighting a
-   flex row for space. */
 .subscription-block {
     margin-top: 10px;
     padding-top: 10px;
@@ -134,7 +214,6 @@ a.back-link:hover, a.back-link:focus-visible { text-decoration: underline; }
     line-height: 1.5;
     font-style: italic;
 }
-
 .detail {
     font-size: 12px;
     color: var(--text-dim);
@@ -142,54 +221,97 @@ a.back-link:hover, a.back-link:focus-visible { text-decoration: underline; }
     line-height: 1.5;
     word-break: break-word;
 }
-
 .card-actions {
-    /* Pins actions to the card's bottom edge regardless of how much status text sits above,
-       so Login/Check again line up across every card - even the shorter ones. */
     margin-top: auto;
     padding-top: 14px;
     display: flex;
     gap: 8px;
-}
-button {
-    background: var(--panel);
-    border: 1px solid var(--dim);
-    color: var(--text);
-    padding: 6px 14px;
-    border-radius: 4px;
-    cursor: pointer;
-    font-family: inherit;
-    font-size: 12px;
-}
-button:hover { border-color: var(--cyan); color: var(--cyan); }
-button:disabled { opacity: 0.5; cursor: default; }
-button:focus-visible, a:focus-visible {
-    outline: 2px solid var(--cyan);
-    outline-offset: 2px;
-}
-#error-banner {
-    display: none;
-    background: var(--red);
-    color: var(--bg);
-    padding: 8px 12px;
-    border-radius: 4px;
-    margin-bottom: 16px;
-    font-size: 13px;
 }
     </style>
 </head>
 <body>
     <div class="page">
         <a class="back-link" href="/cockpit">&larr; Cockpit</a>
-        <h1>PROVIDER ACCOUNTS</h1>
+        <h1>SETTINGS</h1>
         <p class="subtitle">
-            Whether each local AI provider CLI is installed and signed in under your own account.
-            Synagon never reads, stores, or transmits a credential of any kind — it only launches
-            each provider's own login flow and reads status from commands that provider documents
-            as safe and non-interactive.
+            Appearance, workspace, agents, execution, and diagnostics — for this machine and
+            this project.
         </p>
         <div id="error-banner"></div>
-        <div id="provider-cards">Loading…</div>
+
+        <nav class="tabs" role="tablist" aria-label="Settings sections">
+            <button class="tab-btn active" data-tab="appearance" role="tab" aria-selected="true" id="tabbtn-appearance">Appearance</button>
+            <button class="tab-btn" data-tab="workspace" role="tab" aria-selected="false" id="tabbtn-workspace">Workspace</button>
+            <button class="tab-btn" data-tab="agents" role="tab" aria-selected="false" id="tabbtn-agents">Agents &amp; Providers</button>
+            <button class="tab-btn" data-tab="execution" role="tab" aria-selected="false" id="tabbtn-execution">Execution</button>
+            <button class="tab-btn" data-tab="terminal" role="tab" aria-selected="false" id="tabbtn-terminal">Terminal &amp; Desktop</button>
+            <button class="tab-btn" data-tab="safety" role="tab" aria-selected="false" id="tabbtn-safety">Safety &amp; Diagnostics</button>
+        </nav>
+
+        <section class="tab-panel active" id="tab-appearance" role="tabpanel" aria-labelledby="tabbtn-appearance">
+            <div class="settings-group">
+                <h2>Appearance</h2>
+                <p class="unavailable-note" style="margin-top:-6px;">Applies immediately, and is saved to this machine (not this project).</p>
+                <div class="field-row">
+                    <span class="field-label">Theme</span>
+                    <select id="appearance-theme">
+                        <option value="theme-srcery">Srcery</option>
+                        <option value="theme-moonfly">Moonfly</option>
+                        <option value="theme-jellybeans">Jellybeans</option>
+                        <option value="theme-tender">Tender</option>
+                        <option value="theme-miasma">Miasma</option>
+                    </select>
+                </div>
+                <div class="field-row">
+                    <span class="field-label">Density</span>
+                    <select id="appearance-density">
+                        <option value="comfortable">Comfortable</option>
+                        <option value="compact">Compact</option>
+                    </select>
+                </div>
+                <div class="field-row">
+                    <span class="field-label">Terminal / output font size
+                        <span class="hint">10–24px</span>
+                    </span>
+                    <input type="number" id="appearance-font-size" min="10" max="24" step="1">
+                </div>
+                <div class="field-row">
+                    <span class="field-label">Reduced motion</span>
+                    <input type="checkbox" id="appearance-reduced-motion">
+                </div>
+                <span class="save-status" id="appearance-status"></span>
+            </div>
+        </section>
+
+        <section class="tab-panel" id="tab-workspace" role="tabpanel" aria-labelledby="tabbtn-workspace">
+            <!-- Task 10 -->
+        </section>
+
+        <section class="tab-panel" id="tab-agents" role="tabpanel" aria-labelledby="tabbtn-agents">
+            <div class="settings-group">
+                <h2>Provider Accounts</h2>
+                <p class="subtitle" style="margin-bottom:8px;">
+                    Whether each local AI provider CLI is installed and signed in under your own
+                    account. Synagon never reads, stores, or transmits a credential of any kind —
+                    it only launches each provider's own login flow and reads status from
+                    commands that provider documents as safe and non-interactive.
+                </p>
+                <div id="provider-cards">Loading…</div>
+            </div>
+            <!-- role/agent table and provider enable/disable note added in Task 11 -->
+        </section>
+
+        <section class="tab-panel" id="tab-execution" role="tabpanel" aria-labelledby="tabbtn-execution">
+            <!-- Task 12 -->
+        </section>
+
+        <section class="tab-panel" id="tab-terminal" role="tabpanel" aria-labelledby="tabbtn-terminal">
+            <!-- Task 12 -->
+        </section>
+
+        <section class="tab-panel" id="tab-safety" role="tabpanel" aria-labelledby="tabbtn-safety">
+            <!-- Task 13 -->
+        </section>
     </div>
 
     <script>
@@ -199,24 +321,6 @@ button:focus-visible, a:focus-visible {
         return (raw && raw.indexOf('__') !== 0) ? raw : '';
     })();
 
-    const PROVIDER_LABELS = {
-        claude: 'Claude Code',
-        opencode: 'OpenCode',
-        antigravity: 'Antigravity (agy)',
-        codex: 'Codex (ChatGPT)',
-    };
-
-    const STATE_LABELS = {
-        authenticated: 'Verified',
-        auth_unverifiable: 'Cannot be confirmed automatically',
-        not_authenticated: 'Not signed in',
-        auth_expired: 'Login expired',
-        not_installed: 'Not installed',
-        provider_unavailable: 'Unavailable',
-        cli_error: 'CLI error',
-        timed_out: 'Timed out',
-    };
-
     async function apiGet(path) {
         const res = await fetch(path, { headers: { 'X-Orchestrator-Token': TOKEN } });
         if (!res.ok) throw new Error(`API error: ${res.status}`);
@@ -224,11 +328,28 @@ button:focus-visible, a:focus-visible {
     }
 
     async function apiControl(action, body) {
-        const endpoint = '/api/control/' + action;
-        const res = await fetch(endpoint, {
+        const res = await fetch('/api/control/' + action, {
             method: 'POST',
             headers: { 'X-Orchestrator-Token': TOKEN, 'Content-Type': 'application/json' },
             body: JSON.stringify(body || {}),
+        });
+        return res.json();
+    }
+
+    async function apiSavePreferences(patch) {
+        const res = await fetch('/api/preferences', {
+            method: 'POST',
+            headers: { 'X-Orchestrator-Token': TOKEN, 'Content-Type': 'application/json' },
+            body: JSON.stringify(patch),
+        });
+        return res.json();
+    }
+
+    async function apiSaveSettings(patch) {
+        const res = await fetch('/api/settings', {
+            method: 'POST',
+            headers: { 'X-Orchestrator-Token': TOKEN, 'Content-Type': 'application/json' },
+            body: JSON.stringify(patch),
         });
         return res.json();
     }
@@ -245,14 +366,129 @@ button:focus-visible, a:focus-visible {
         return div.innerHTML;
     }
 
-    function renderCard(status) {
+    function flashStatus(elementId, ok, message) {
+        const el = document.getElementById(elementId);
+        if (!el) return;
+        el.textContent = message;
+        el.className = 'save-status ' + (ok ? 'ok' : 'err');
+        setTimeout(() => { el.textContent = ''; el.className = 'save-status'; }, 2500);
+    }
+
+    // -- Tabs: click and left/right-arrow, per the ARIA tablist pattern -----------------------
+    const TAB_IDS = ['appearance', 'workspace', 'agents', 'execution', 'terminal', 'safety'];
+
+    function activateTab(name) {
+        for (const id of TAB_IDS) {
+            const btn = document.getElementById('tabbtn-' + id);
+            const panel = document.getElementById('tab-' + id);
+            const active = id === name;
+            btn.classList.toggle('active', active);
+            btn.setAttribute('aria-selected', String(active));
+            btn.tabIndex = active ? 0 : -1;
+            panel.classList.toggle('active', active);
+        }
+    }
+
+    document.querySelector('.tabs').addEventListener('click', (event) => {
+        const btn = event.target.closest('.tab-btn');
+        if (btn) activateTab(btn.getAttribute('data-tab'));
+    });
+
+    document.querySelector('.tabs').addEventListener('keydown', (event) => {
+        if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return;
+        const current = TAB_IDS.indexOf(document.activeElement.getAttribute('data-tab'));
+        if (current === -1) return;
+        const delta = event.key === 'ArrowRight' ? 1 : -1;
+        const next = (current + delta + TAB_IDS.length) % TAB_IDS.length;
+        const nextBtn = document.getElementById('tabbtn-' + TAB_IDS[next]);
+        nextBtn.focus();
+        activateTab(TAB_IDS[next]);
+        event.preventDefault();
+    });
+
+    // -- Theme, shared with the menu and the cockpit (Package I) -------------------------------
+    window.__applyTheme = function(themeId, opts) {
+        const persist = !opts || opts.persist !== false;
+        document.body.classList.remove('theme-srcery', 'theme-miasma', 'theme-tender', 'theme-jellybeans', 'theme-moonfly');
+        document.body.classList.add(themeId);
+        const select = document.getElementById('appearance-theme');
+        if (select) select.value = themeId;
+        if (persist) apiSavePreferences({ theme: themeId }).catch(() => {});
+    };
+
+    // -- Appearance section ---------------------------------------------------------------------
+    async function initAppearance() {
+        let prefs;
+        try {
+            prefs = await apiGet('/api/preferences');
+        } catch (err) {
+            showError('Could not load preferences: ' + err.message);
+            return;
+        }
+        window.__applyTheme(prefs.theme, { persist: false });
+        document.body.classList.toggle('density-compact', prefs.density === 'compact');
+        document.body.classList.toggle('reduced-motion', !!prefs.reduced_motion);
+        document.getElementById('appearance-density').value = prefs.density;
+        document.getElementById('appearance-font-size').value = prefs.terminal_font_size;
+        document.getElementById('appearance-reduced-motion').checked = !!prefs.reduced_motion;
+
+        document.getElementById('appearance-theme').addEventListener('change', (e) => {
+            window.__applyTheme(e.target.value);
+            flashStatus('appearance-status', true, 'Saved');
+        });
+        document.getElementById('appearance-density').addEventListener('change', async (e) => {
+            document.body.classList.toggle('density-compact', e.target.value === 'compact');
+            try {
+                await apiSavePreferences({ density: e.target.value });
+                flashStatus('appearance-status', true, 'Saved');
+            } catch (err) {
+                flashStatus('appearance-status', false, 'Could not save');
+            }
+        });
+        document.getElementById('appearance-font-size').addEventListener('change', async (e) => {
+            const value = parseInt(e.target.value, 10);
+            try {
+                const result = await apiSavePreferences({ terminal_font_size: value });
+                if (result.ok === false) throw new Error(result.error || 'invalid value');
+                flashStatus('appearance-status', true, 'Saved');
+            } catch (err) {
+                flashStatus('appearance-status', false, err.message);
+            }
+        });
+        document.getElementById('appearance-reduced-motion').addEventListener('change', async (e) => {
+            document.body.classList.toggle('reduced-motion', e.target.checked);
+            try {
+                await apiSavePreferences({ reduced_motion: e.target.checked });
+                flashStatus('appearance-status', true, 'Saved');
+            } catch (err) {
+                flashStatus('appearance-status', false, 'Could not save');
+            }
+        });
+    }
+
+    // -- Provider accounts (Package G, unchanged behavior) --------------------------------------
+    const PROVIDER_LABELS = {
+        claude: 'Claude Code',
+        opencode: 'OpenCode',
+        antigravity: 'Antigravity (agy)',
+        codex: 'Codex (ChatGPT)',
+    };
+    const STATE_LABELS = {
+        authenticated: 'Verified',
+        auth_unverifiable: 'Cannot be confirmed automatically',
+        not_authenticated: 'Not signed in',
+        auth_expired: 'Login expired',
+        not_installed: 'Not installed',
+        provider_unavailable: 'Unavailable',
+        cli_error: 'CLI error',
+        timed_out: 'Timed out',
+    };
+
+    function renderProviderCard(status) {
         const label = PROVIDER_LABELS[status.provider] || status.provider;
         const stateLabel = STATE_LABELS[status.auth_state] || status.auth_state;
         const installedText = status.installed ? 'Yes' : 'No';
         const installedClass = status.installed ? 'yes' : 'no';
-        // status.detail and status.subscription_detail are the only fields on this page that
-        // ultimately come from a provider CLI's own stdout (via provider_auth.py), rather than
-        // from the orchestrator itself - escape them before they reach innerHTML.
         const subscriptionBlock = status.subscription_detail
             ? `<div class="subscription-block">
                    <span class="caption">Subscription</span>
@@ -278,8 +514,8 @@ button:focus-visible, a:focus-visible {
     async function loadProviders() {
         try {
             const data = await apiGet('/api/providers');
-            const container = document.getElementById('provider-cards');
-            container.innerHTML = (data.providers || []).map(renderCard).join('');
+            document.getElementById('provider-cards').innerHTML =
+                (data.providers || []).map(renderProviderCard).join('');
             showError('');
         } catch (err) {
             showError('Could not load provider status: ' + err.message);
@@ -305,6 +541,8 @@ button:focus-visible, a:focus-visible {
         }
     });
 
+    // -- Boot -------------------------------------------------------------------------------
+    initAppearance();
     loadProviders();
     </script>
 </body>

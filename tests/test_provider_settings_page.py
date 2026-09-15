@@ -122,5 +122,44 @@ class TestThemeMenu(unittest.TestCase):
         self.assertIn('"preferences.json"', self.source)
 
 
+class TestSettingsPageTabs(unittest.TestCase):
+    def setUp(self):
+        self.page = (WEB_DIR / "settings.html").read_text(encoding="utf-8")
+
+    def test_has_six_tabs(self):
+        for tab in ("appearance", "workspace", "agents", "execution", "terminal", "safety"):
+            self.assertIn(f'data-tab="{tab}"', self.page)
+
+    def test_tabs_use_aria_tablist_roles(self):
+        self.assertIn('role="tablist"', self.page)
+        self.assertIn('role="tab"', self.page)
+        self.assertIn('role="tabpanel"', self.page)
+
+    def test_links_shared_theme_css(self):
+        self.assertIn('href="/shared/theme.css"', self.page)
+
+    def test_still_carries_the_token_placeholder(self):
+        self.assertIn('name="orchestrator-token"', self.page)
+        self.assertIn("__ORCHESTRATOR_TOKEN__", self.page)
+
+
+class TestAppearanceSection(unittest.TestCase):
+    def setUp(self):
+        self.page = (WEB_DIR / "settings.html").read_text(encoding="utf-8")
+
+    def test_has_theme_density_font_and_motion_controls(self):
+        self.assertIn('id="tab-appearance"', self.page)
+        self.assertIn('id="appearance-theme"', self.page)
+        self.assertIn('id="appearance-density"', self.page)
+        self.assertIn('id="appearance-font-size"', self.page)
+        self.assertIn('id="appearance-reduced-motion"', self.page)
+
+    def test_saves_through_preferences_api(self):
+        self.assertIn("/api/preferences", self.page)
+
+    def test_defines_apply_theme_hook(self):
+        self.assertIn("window.__applyTheme", self.page)
+
+
 if __name__ == "__main__":
     unittest.main()
