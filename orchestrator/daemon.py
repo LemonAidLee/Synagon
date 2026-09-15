@@ -331,6 +331,34 @@ class Daemon:
 
         return {"providers": check_all_providers()}
 
+    def doctor_report(self) -> Dict[str, Any]:
+        """The same probe `--doctor` runs, for the settings page's diagnostics panel."""
+        from orchestrator.config import get_preflight_config
+        from orchestrator.preflight import format_preflight_report, run_preflight
+
+        cfg = get_preflight_config(self.config)
+        report = run_preflight(
+            self.config,
+            deep=False,
+            strict=bool(cfg.get("strict", True)),
+            timeout=int(cfg.get("timeout_seconds", 15)),
+        )
+        return {"report": report, "text": format_preflight_report(report, color=False)}
+
+    def diagnostics_report(self) -> Dict[str, Any]:
+        """A combined, already-redacted text report: preflight plus provider account status."""
+        from orchestrator.preflight import format_preflight_report, run_preflight
+        from orchestrator.provider_auth import check_all_providers, format_provider_report
+
+        preflight = run_preflight(self.config, deep=False)
+        providers = check_all_providers()
+        text = (
+            format_preflight_report(preflight, color=False)
+            + "\n\n"
+            + format_provider_report(providers, color=False)
+        )
+        return {"text": text}
+
     def provider_login(self, provider: str) -> Dict[str, Any]:
         """Open one provider's own login flow in a detached terminal (Package G).
 
@@ -836,6 +864,16 @@ def sse_frame(event: str, payload: Any) -> bytes:
 #: A page served by `serve.py` keeps the placeholder, and reads that as "no daemon here".
 TOKEN_PLACEHOLDER = "__ORCHESTRATOR_TOKEN__"
 
+
+def app_version() -> str:
+    """The desktop shell's own version, read from its package.json. "unknown" if absent."""
+    try:
+        path = Path(__file__).resolve().parent.parent / "desktop" / "package.json"
+        return json.loads(path.read_text(encoding="utf-8")).get("version", "unknown")
+    except Exception:
+        return "unknown"
+
+
 #: Third-party files served from `web/vendor/`, name -> content type. An explicit list, so
 #: adding a library is a deliberate edit here rather than a consequence of dropping a file in
 #: a directory. Vendored rather than fetched from a CDN because the daemon is a loopback
@@ -1022,6 +1060,36 @@ def make_daemon_handler(daemon: "Daemon", port: int):
                     self._send(_json_bytes(current_settings(daemon.config)), "application/json")
                 except Exception as exc:
                     self._send(_json_bytes({"error": str(exc)}), "application/json", status=500)
+                return
+
+            if route == "/api/doctor":
+                try:
+                    self._send(_json_bytes(daemon.doctor_report()), "application/json")
+                except Exception as exc:
+                    self._send(_json_bytes({"error": str(exc)}), "application/json", status=500)
+                return
+
+            if route == "/api/diagnostics":
+                try:
+                    self._send(_json_bytes(daemon.diagnostics_report()), "application/json")
+                except Exception as exc:
+                    self._send(_json_bytes({"error": str(exc)}), "application/json", status=500)
+                return
+
+            if route == "/api/app_info":
+                from orchestrator.config import ConfigValidationError, validate_config
+
+                valid, error = True, None
+                try:
+                    validate_config(daemon.config)
+                except ConfigValidationError as exc:
+                    valid, error = False, str(exc)
+                self._send(
+                    _json_bytes(
+                        {"version": app_version(), "config_valid": valid, "config_error": error}
+                    ),
+                    "application/json",
+                )
                 return
 
             if route == "/api/terminals":

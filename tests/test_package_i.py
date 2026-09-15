@@ -157,5 +157,43 @@ class TestSettingsRoute(_SettingsWritableDaemonCase):
         self.assertFalse(body["ok"])
 
 
+class TestDoctorRoute(_SettingsDaemonCase):
+    def test_get_returns_a_report_and_text(self):
+        fake_report = {"ok": True, "strict": True, "agents": []}
+        with patch("orchestrator.preflight.run_preflight", return_value=fake_report):
+            status, body = self._get("/api/doctor")
+        self.assertEqual(status, 200)
+        self.assertIn("text", body)
+        self.assertIn("report", body)
+
+
+class TestDiagnosticsRoute(_SettingsDaemonCase):
+    def test_get_combines_preflight_and_provider_text(self):
+        with patch(
+            "orchestrator.preflight.run_preflight",
+            return_value={"ok": True, "strict": True, "agents": []},
+        ), patch("orchestrator.provider_auth.check_all_providers", return_value=[]):
+            status, body = self._get("/api/diagnostics")
+        self.assertEqual(status, 200)
+        self.assertIn("text", body)
+
+
+class TestAppInfoRoute(_SettingsDaemonCase):
+    def test_get_reports_version_and_validity(self):
+        # _SettingsDaemonCase's shared fixture config ({"agents": [], "roles": {}}) is
+        # deliberately minimal for routes that don't validate it, but an empty 'agents'
+        # list genuinely fails validate_config (see orchestrator/config.py). Swap in a
+        # minimal but valid config here so this test exercises the true "valid" path
+        # without touching the shared fixture other test classes rely on.
+        self.daemon.config = {
+            "agents": [{"agent": "claude", "role": "implementer"}],
+            "roles": {},
+        }
+        status, body = self._get("/api/app_info")
+        self.assertEqual(status, 200)
+        self.assertIn("version", body)
+        self.assertTrue(body["config_valid"])
+
+
 if __name__ == "__main__":
     unittest.main()
