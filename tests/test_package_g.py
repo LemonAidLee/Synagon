@@ -82,7 +82,7 @@ class TestSettingsPageRoute(_ProviderDaemonCase):
         status, body = self._get("/settings")
         self.assertEqual(status, 200)
         text = body.decode("utf-8")
-        self.assertIn("PROVIDER ACCOUNTS", text)
+        self.assertIn("SETTINGS", text)
         self.assertNotIn("__ORCHESTRATOR_TOKEN__", text)
         self.assertIn('content="t"', text)
 
