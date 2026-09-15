@@ -15,6 +15,12 @@
 // own about a run. Every fact still comes from the daemon, which still gets it from the
 // stores. If this shell were deleted, `--daemon` in a terminal would lose nothing but a
 // window frame - and that is the test of whether the split in Roadmap §10.7 was kept.
+//
+// Package I adds one more small trusted read/write: `~/.orchestrator/preferences.json`, the
+// same per-machine JSON file the daemon's `/api/preferences` route reads and writes. Electron's
+// main process reads it directly (plain `fs`, like the handshake file already is) rather than
+// through HTTP, because the menu needs a theme's checked state and a default folder before any
+// project window - and its daemon - exists.
 
 // Electron degrades to a plain Node interpreter - `require("electron")` returns a path
 // string instead of the {app, BrowserWindow, ...} API - whenever ELECTRON_RUN_AS_NODE is set
@@ -38,6 +44,7 @@ const { app, BrowserWindow, Menu, dialog, shell } = require("electron");
 const { spawn } = require("child_process");
 const fs = require("fs");
 const net = require("net");
+const os = require("os");
 const path = require("path");
 
 // The repository this shell ships inside. The daemon is a module in it, not a bundled binary:
@@ -46,6 +53,40 @@ const REPO_ROOT = path.resolve(__dirname, "..");
 
 /** One open project: its window, its daemon process, and the folder it was opened on. */
 const projects = new Map(); // window id -> { window, child, projectRoot, port }
+
+const PREFERENCES_PATH = path.join(os.homedir(), ".orchestrator", "preferences.json");
+const THEME_IDS = ["theme-srcery", "theme-moonfly", "theme-jellybeans", "theme-tender", "theme-miasma"];
+const THEME_LABELS = {
+  "theme-srcery": "Srcery",
+  "theme-moonfly": "Moonfly",
+  "theme-jellybeans": "Jellybeans",
+  "theme-tender": "Tender",
+  "theme-miasma": "Miasma",
+};
+
+/** Every saved preference, or `{}` if the file does not exist yet or cannot be read. */
+function readPreferences() {
+  try {
+    return JSON.parse(fs.readFileSync(PREFERENCES_PATH, "utf-8"));
+  } catch (err) {
+    return {};
+  }
+}
+
+/** Merge `patch` into the saved preferences and write it back, atomically. Never throws. */
+function writePreferences(patch) {
+  const next = { ...readPreferences(), ...patch };
+  try {
+    fs.mkdirSync(path.dirname(PREFERENCES_PATH), { recursive: true });
+    const tmp = PREFERENCES_PATH + ".tmp";
+    fs.writeFileSync(tmp, JSON.stringify(next, null, 2), "utf-8");
+    fs.renameSync(tmp, PREFERENCES_PATH);
+  } catch (err) {
+    // The daemon's own /api/preferences route is the source of truth for any open page; a
+    // failed write here only means the menu's *next* rebuild still shows the old theme.
+  }
+  return next;
+}
 
 function pythonCommand() {
   // The project's own virtualenv first, because that is where its dependencies are. An
@@ -237,16 +278,35 @@ async function openProject(projectRoot) {
 }
 
 async function chooseProject(parent) {
-  const result = await dialog.showOpenDialog(parent || null, {
+  const prefs = readPreferences();
+  const options = {
     title: "Open a project",
     properties: ["openDirectory"],
     buttonLabel: "Open",
-  });
+  };
+  if (prefs.default_workspace_dir && fs.existsSync(prefs.default_workspace_dir)) {
+    options.defaultPath = prefs.default_workspace_dir;
+  }
+  const result = await dialog.showOpenDialog(parent || null, options);
   if (result.canceled || !result.filePaths.length) return null;
   return openProject(result.filePaths[0]);
 }
 
+/** Apply a theme to one open window's page immediately, and remember the choice. */
+function applyTheme(themeId, window) {
+  writePreferences({ theme: themeId });
+  if (window && !window.isDestroyed()) {
+    window.webContents
+      .executeJavaScript(`window.__applyTheme && window.__applyTheme(${JSON.stringify(themeId)});`)
+      .catch(() => {});
+  }
+  buildMenu(); // rebuild so the radio state - here, and on every other open window - reflects it
+}
+
 function buildMenu() {
+  const prefs = readPreferences();
+  const currentTheme = THEME_IDS.includes(prefs.theme) ? prefs.theme : "theme-srcery";
+
   const template = [
     {
       label: "File",
@@ -306,8 +366,19 @@ function buildMenu() {
       label: "Settings",
       submenu: [
         {
-          label: "Provider Accounts…",
+          label: "Open Settings…",
+          accelerator: "CmdOrCtrl+,",
           click: (_item, window) => window && window.loadURL(urlFor(window, "/settings")),
+        },
+        { type: "separator" },
+        {
+          label: "Theme",
+          submenu: THEME_IDS.map((id) => ({
+            label: THEME_LABELS[id],
+            type: "radio",
+            checked: id === currentTheme,
+            click: (_item, window) => applyTheme(id, window),
+          })),
         },
       ],
     },

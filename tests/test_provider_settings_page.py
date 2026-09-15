@@ -87,10 +87,39 @@ class TestDesktopSettingsMenu(unittest.TestCase):
         self.assertIn('urlFor(window, "/settings")', self.source)
 
     def test_settings_menu_follows_window_menu(self):
-        """Placed after Window, per the design brief."""
         window_menu_pos = self.source.index('{ role: "windowMenu" }')
         settings_pos = self.source.index('label: "Settings"')
         self.assertLess(window_menu_pos, settings_pos)
+
+    def test_settings_submenu_item_is_generic_now(self):
+        """Package I: the page behind /settings is no longer provider-accounts-only."""
+        self.assertIn('label: "Open Settings…"', self.source)
+        self.assertNotIn('label: "Provider Accounts…"', self.source)
+
+    def test_settings_has_an_accelerator(self):
+        self.assertIn('accelerator: "CmdOrCtrl+,"', self.source)
+
+
+class TestThemeMenu(unittest.TestCase):
+    def setUp(self):
+        desktop_main = WEB_DIR.parent.parent / "desktop" / "main.js"
+        self.source = desktop_main.read_text(encoding="utf-8")
+
+    def test_theme_submenu_exists_under_settings(self):
+        settings_pos = self.source.index('label: "Settings"')
+        theme_pos = self.source.index('label: "Theme"')
+        self.assertLess(settings_pos, theme_pos)
+
+    def test_theme_items_are_radios(self):
+        self.assertIn('type: "radio"', self.source)
+
+    def test_theme_click_applies_and_persists(self):
+        self.assertIn("applyTheme", self.source)
+        self.assertIn("__applyTheme", self.source)
+
+    def test_reads_and_writes_preferences_json(self):
+        self.assertIn('".orchestrator"', self.source)
+        self.assertIn('"preferences.json"', self.source)
 
 
 if __name__ == "__main__":
