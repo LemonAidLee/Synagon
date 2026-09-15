@@ -55,6 +55,15 @@ class _SettingsDaemonCase(unittest.TestCase):
         except urllib.error.HTTPError as exc:
             return exc.code, json.loads(exc.read().decode("utf-8") or "{}")
 
+    def _get_raw(self, path):
+        request = urllib.request.Request(self.base + path)
+        request.add_header(TOKEN_HEADER, "t")
+        try:
+            with urllib.request.urlopen(request, timeout=10) as response:
+                return response.status, response.read()
+        except urllib.error.HTTPError as exc:
+            return exc.code, exc.read()
+
     def _post(self, path, payload=None):
         body = json.dumps(payload if payload is not None else {}).encode("utf-8")
         request = urllib.request.Request(self.base + path, data=body, method="POST")
@@ -228,6 +237,16 @@ class TestPruneExecuteRoute(_SettingsDaemonCase):
         status, body = self._post("/api/prune/execute", {})
         self.assertEqual(status, 400)
         self.assertFalse(body["ok"])
+
+
+class TestSharedThemeRoute(_SettingsDaemonCase):
+    def test_get_serves_theme_css(self):
+        status, _ = self._get_raw("/shared/theme.css")
+        self.assertEqual(status, 200)
+
+    def test_unknown_shared_file_is_404(self):
+        status, _ = self._get_raw("/shared/does-not-exist.css")
+        self.assertEqual(status, 404)
 
 
 if __name__ == "__main__":

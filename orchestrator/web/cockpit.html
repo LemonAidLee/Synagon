@@ -5,162 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="orchestrator-token" content="__ORCHESTRATOR_TOKEN__">
     <title>SYNAGON</title>
+    <link rel="stylesheet" href="/shared/theme.css">
     <style>
-:root, body.theme-srcery {
-    --bg: #1C1B19;
-    --panel: #2D2C29;
-    --green: #519F50;
-    --amber: #FBB829;
-    --red: #EF2F27;
-    --cyan: #0AAEB3;
-    --dim: #918175;
-    --text: #FCE8C3;
-    --text-dim: #BAA67F;
-
-    --scrollbar-track: var(--panel);
-    --scrollbar-thumb: #3a3936;
-    --scrollbar-thumb-hover: #4a4946;
-    --scrollbar-thumb-active: var(--dim);
-
-    --hl-keyword: #E02C6D;
-    --hl-string: #519F50;
-    --hl-comment: #918175;
-    --hl-number: #68A8E4;
-    --hl-type: #0AAEB3;
-    --hl-builtin: #2C78BF;
-    --hl-function: #FBB829;
-
-    /* ANSI Colors (Srcery) */
-    --ansi-30: #1C1B19; --ansi-31: #EF2F27; --ansi-32: #519F50; --ansi-33: #FBB829;
-    --ansi-34: #2C78BF; --ansi-35: #E02C6D; --ansi-36: #0AAEB3; --ansi-37: #BAA67F;
-    --ansi-90: #918175; --ansi-91: #F75341; --ansi-92: #98BC37; --ansi-93: #FED06E;
-    --ansi-94: #68A8E4; --ansi-95: #FF5C8F; --ansi-96: #2BE4D0; --ansi-97: #FCE8C3;
-}
-
-body.theme-moonfly {
-    --bg: #080808;
-    --panel: #141414;
-    --green: #8cc85f;
-    --amber: #e3c78a;
-    --red: #ff5454;
-    --cyan: #79dac8;
-    --dim: #323437;
-    --text: #d0d0d0;
-    --text-dim: #888888;
-
-    --scrollbar-track: var(--panel);
-    --scrollbar-thumb: #323437;
-    --scrollbar-thumb-hover: #505050;
-    --scrollbar-thumb-active: var(--dim);
-
-    --hl-keyword: #cf87e8;
-    --hl-string: #8cc85f;
-    --hl-comment: #505050;
-    --hl-number: #ff5454;
-    --hl-type: #79dac8;
-    --hl-builtin: #80a0ff;
-    --hl-function: #e3c78a;
-
-    /* ANSI Colors (Moonfly) */
-    --ansi-30: #323437; --ansi-31: #ff5454; --ansi-32: #8cc85f; --ansi-33: #e3c78a;
-    --ansi-34: #80a0ff; --ansi-35: #cf87e8; --ansi-36: #79dac8; --ansi-37: #d0d0d0;
-    --ansi-90: #505050; --ansi-91: #ff5454; --ansi-92: #8cc85f; --ansi-93: #e3c78a;
-    --ansi-94: #80a0ff; --ansi-95: #cf87e8; --ansi-96: #79dac8; --ansi-97: #ffffff;
-}
-
-body.theme-jellybeans {
-    --bg: #151515;
-    --panel: #1c1c1c;
-    --green: #99ad6a;
-    --amber: #d8ad4c;
-    --red: #cf6a4c;
-    --cyan: #71b9f8;
-    --dim: #404040;
-    --text: #e8e8d3;
-    --text-dim: #888888;
-
-    --scrollbar-track: var(--panel);
-    --scrollbar-thumb: #3b3b3b;
-    --scrollbar-thumb-hover: #555555;
-    --scrollbar-thumb-active: var(--dim);
-
-    --hl-keyword: #8fbfdc;
-    --hl-string: #99ad6a;
-    --hl-comment: #888888;
-    --hl-number: #cf6a4c;
-    --hl-type: #71b9f8;
-    --hl-builtin: #cf6a4c;
-    --hl-function: #d8ad4c;
-
-    /* ANSI Colors (Jellybeans) */
-    --ansi-30: #3b3b3b; --ansi-31: #cf6a4c; --ansi-32: #99ad6a; --ansi-33: #d8ad4c;
-    --ansi-34: #597bc5; --ansi-35: #a037b0; --ansi-36: #71b9f8; --ansi-37: #adadad;
-    --ansi-90: #404040; --ansi-91: #cf6a4c; --ansi-92: #99ad6a; --ansi-93: #d8ad4c;
-    --ansi-94: #597bc5; --ansi-95: #a037b0; --ansi-96: #71b9f8; --ansi-97: #e8e8d3;
-}
-
-body.theme-tender {
-    --bg: #282828;
-    --panel: #202020;
-    --green: #c9d05c;
-    --amber: #ffc24b;
-    --red: #f43753;
-    --cyan: #73cef4;
-    --dim: #4c4c4c;
-    --text: #eeeeee;
-    --text-dim: #b3b3b3;
-
-    --scrollbar-track: var(--panel);
-    --scrollbar-thumb: #3a3a3a;
-    --scrollbar-thumb-hover: #4d4d4d;
-    --scrollbar-thumb-active: var(--dim);
-
-    --hl-keyword: #d3b987;
-    --hl-string: #c9d05c;
-    --hl-comment: #4c4c4c;
-    --hl-number: #ffc24b;
-    --hl-type: #b3deef;
-    --hl-builtin: #73cef4;
-    --hl-function: #d3b987;
-
-    /* ANSI Colors (Tender) */
-    --ansi-30: #282828; --ansi-31: #f43753; --ansi-32: #c9d05c; --ansi-33: #ffc24b;
-    --ansi-34: #b3deef; --ansi-35: #d3b987; --ansi-36: #73cef4; --ansi-37: #eeeeee;
-    --ansi-90: #4c4c4c; --ansi-91: #f43753; --ansi-92: #c9d05c; --ansi-93: #ffc24b;
-    --ansi-94: #b3deef; --ansi-95: #d3b987; --ansi-96: #73cef4; --ansi-97: #ffffff;
-}
-
-body.theme-miasma {
-    --bg: #222222;
-    --panel: #1a1a1a;
-    --green: #5f875f;
-    --amber: #b36d43;
-    --red: #bb7744;
-    --cyan: #c9a554;
-    --dim: #666666;
-    --text: #c2c2b0;
-    --text-dim: #78824b;
-
-    --scrollbar-track: var(--panel);
-    --scrollbar-thumb: #333333;
-    --scrollbar-thumb-hover: #4a4a4a;
-    --scrollbar-thumb-active: var(--text-dim);
-
-    --hl-keyword: #78824b;
-    --hl-string: #c9a554;
-    --hl-comment: #666666;
-    --hl-number: #d7c483;
-    --hl-type: #5f875f;
-    --hl-builtin: #b36d43;
-    --hl-function: #c9a554;
-
-    /* ANSI Colors (Miasma) */
-    --ansi-30: #222222; --ansi-31: #685742; --ansi-32: #5f875f; --ansi-33: #b36d43;
-    --ansi-34: #78824b; --ansi-35: #bb7744; --ansi-36: #c9a554; --ansi-37: #d7c483;
-    --ansi-90: #666666; --ansi-91: #685742; --ansi-92: #5f875f; --ansi-93: #b36d43;
-    --ansi-94: #78824b; --ansi-95: #bb7744; --ansi-96: #c9a554; --ansi-97: #d7c483;
-}
-
 :root {
     --font: "Cascadia Code", "JetBrains Mono", "SF Mono", Consolas, "DejaVu Sans Mono", "Courier New", monospace;
     --font-mono: "Cascadia Code", "JetBrains Mono", "SF Mono", Consolas, "DejaVu Sans Mono", "Courier New", monospace;
@@ -1199,6 +1045,14 @@ body.terminals-hidden .terminals-area, body.terminals-hidden #splitter-terminals
         });
         return res.json();
     }
+    async function apiSavePreferences(patch) {
+        const res = await fetch("/api/preferences", {
+            method: "POST",
+            headers: { 'X-Orchestrator-Token': TOKEN, 'Content-Type': 'application/json' },
+            body: JSON.stringify(patch)
+        });
+        return res.json();
+    }
 
     // 4. DOM ELEMENTS
     const DOM = {
@@ -1231,6 +1085,14 @@ body.terminals-hidden .terminals-area, body.terminals-hidden #splitter-terminals
         boardPane: document.getElementById('board-pane'),
         terminalsList: document.getElementById('terminals-list'),
         toastContainer: document.getElementById('toast-container')
+    };
+
+    window.__applyTheme = function(themeId, opts) {
+        const persist = !opts || opts.persist !== false;
+        document.body.classList.remove('theme-srcery', 'theme-miasma', 'theme-tender', 'theme-jellybeans', 'theme-moonfly');
+        document.body.classList.add(themeId);
+        if (DOM.themeSelect) DOM.themeSelect.value = themeId;
+        if (persist) apiSavePreferences({ theme: themeId }).catch(() => {});
     };
 
     // 4b. REMEMBERED GEOMETRY AND PANE CHOICE
@@ -2705,16 +2567,17 @@ body.terminals-hidden .terminals-area, body.terminals-hidden #splitter-terminals
 
     // BOOT SEQUENCE
     async function boot() {
-        // Theme initialization
-        const savedTheme = localStorage.getItem('cockpit-theme') || 'theme-srcery';
-        document.body.classList.add(savedTheme);
+        // Theme initialization - read from the daemon's per-machine preferences (Package I), so
+        // a choice made from the desktop Theme menu or the Settings page is honored here too,
+        // and survives a relaunch (a random port each launch broke localStorage for this).
+        let initialTheme = 'theme-srcery';
+        try {
+            const prefs = await apiGet('/api/preferences');
+            if (prefs && prefs.theme) initialTheme = prefs.theme;
+        } catch (err) { /* keep the default */ }
+        window.__applyTheme(initialTheme, { persist: false });
         if (DOM.themeSelect) {
-            DOM.themeSelect.value = savedTheme;
-            DOM.themeSelect.addEventListener('change', (e) => {
-                document.body.classList.remove('theme-srcery', 'theme-miasma', 'theme-tender', 'theme-jellybeans', 'theme-moonfly');
-                document.body.classList.add(e.target.value);
-                localStorage.setItem('cockpit-theme', e.target.value);
-            });
+            DOM.themeSelect.addEventListener('change', (e) => window.__applyTheme(e.target.value));
         }
 
         // Inspector Back Button

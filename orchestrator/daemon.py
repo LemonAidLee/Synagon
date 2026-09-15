@@ -904,6 +904,12 @@ VENDORED_FILES = {
     "gsap.min.js": "text/javascript; charset=utf-8",
 }
 
+#: Static assets shared by more than one page (currently just the theme palettes), served the
+#: same allow-listed way `VENDORED_FILES` is - an explicit list, not a directory walk.
+SHARED_FILES = {
+    "theme.css": "text/css; charset=utf-8",
+}
+
 
 def make_daemon_handler(daemon: "Daemon", port: int):
     """Build the daemon's request handler on top of the read-only one.
@@ -1000,6 +1006,18 @@ def make_daemon_handler(daemon: "Daemon", port: int):
                 return
             self._send(body, VENDORED_FILES[name])
 
+        def _shared(self, name: str) -> None:
+            """Serve one shared static asset, from a fixed list - same shape as `_vendor`."""
+            if name not in SHARED_FILES:
+                self._send(b"Not found", "text/plain; charset=utf-8", status=404)
+                return
+            try:
+                body = (WEB_DIR / "shared" / name).read_bytes()
+            except Exception:
+                self._send(b"Not found", "text/plain; charset=utf-8", status=404)
+                return
+            self._send(body, SHARED_FILES[name])
+
         # -- reading -------------------------------------------------------
 
         def do_GET(self) -> None:  # noqa: N802
@@ -1026,6 +1044,10 @@ def make_daemon_handler(daemon: "Daemon", port: int):
             # outside it is reachable by naming it.
             if route.startswith("/vendor/"):
                 self._vendor(route[len("/vendor/"):])
+                return
+
+            if route.startswith("/shared/"):
+                self._shared(route[len("/shared/"):])
                 return
 
             if not route.startswith("/api/"):
