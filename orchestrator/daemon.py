@@ -1009,6 +1009,12 @@ def make_daemon_handler(daemon: "Daemon", port: int):
                     self._send(_json_bytes({"error": str(exc)}), "application/json", status=500)
                 return
 
+            if route == "/api/preferences":
+                from orchestrator.preferences import load_preferences
+
+                self._send(_json_bytes(load_preferences()), "application/json")
+                return
+
             if route == "/api/terminals":
                 self._send(
                     _json_bytes({"terminals": daemon.terminals.listing()}), "application/json"
@@ -1223,6 +1229,22 @@ def make_daemon_handler(daemon: "Daemon", port: int):
 
             if route == "/api/team":
                 base.do_POST(self)  # the design surface's write, unchanged
+                return
+
+            if route == "/api/preferences":
+                payload = self._read_json()
+                if payload is None:
+                    return
+                from orchestrator.preferences import PreferencesValidationError, save_preferences
+
+                try:
+                    updated = save_preferences(payload)
+                except PreferencesValidationError as exc:
+                    self._send(
+                        _json_bytes({"ok": False, "error": str(exc)}), "application/json", status=400
+                    )
+                    return
+                self._send(_json_bytes({"ok": True, "preferences": updated}), "application/json")
                 return
 
             if not route.startswith("/api/control/"):
