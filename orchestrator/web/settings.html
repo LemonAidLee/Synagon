@@ -346,7 +346,16 @@ pre.report {
                 </p>
                 <div id="provider-cards">Loading…</div>
             </div>
-            <!-- role/agent table and provider enable/disable note added in Task 11 -->
+            <div class="settings-group">
+                <h2>Role Assignments</h2>
+                <p class="subtitle" style="margin-bottom:8px;">
+                    Read-only here. Editing which agent and model plays which role — to enable or
+                    retire a provider for future runs is the same action as removing it from
+                    every role below — is done in <a href="/design">Design the team</a>, which
+                    already validates a change before it can be saved.
+                </p>
+                <div id="team-summary">Loading…</div>
+            </div>
         </section>
 
         <section class="tab-panel" id="tab-execution" role="tabpanel" aria-labelledby="tabbtn-execution">
@@ -589,6 +598,24 @@ pre.report {
         }
     });
 
+    // -- Agents & Providers: role/model summary (read-only) ------------------------------------
+    async function loadTeamSummary() {
+        const el = document.getElementById('team-summary');
+        try {
+            const data = await apiGet('/api/team');
+            const rows = (data.team.agents || []).map((entry) => {
+                const model = entry.model;
+                const shown = model == null
+                    ? 'Account default'
+                    : (Array.isArray(model) ? model.join(' → ') : escapeHtml(model));
+                return `<div class="provider-row"><span class="label">${escapeHtml(entry.role)} — ${escapeHtml(entry.agent)}</span><span class="value">${shown}</span></div>`;
+            });
+            el.innerHTML = rows.length ? rows.join('') : '<p class="unavailable-note">No agents configured.</p>';
+        } catch (err) {
+            el.textContent = 'Could not load the team: ' + err.message;
+        }
+    }
+
     // -- Workspace section ------------------------------------------------------------------
     let lastPrunePlan = null;
 
@@ -683,6 +710,7 @@ pre.report {
     initAppearance();
     initWorkspace();
     loadProviders();
+    loadTeamSummary();
     </script>
 </body>
 </html>

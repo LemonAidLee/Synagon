@@ -185,5 +185,23 @@ class TestWorkspaceSection(unittest.TestCase):
         self.assertIn('/api/prune/execute', self.page)
 
 
+class TestAgentsProvidersSection(unittest.TestCase):
+    def setUp(self):
+        self.page = (WEB_DIR / "settings.html").read_text(encoding="utf-8")
+
+    def test_reads_the_team_api(self):
+        self.assertIn("/api/team", self.page)
+
+    def test_shows_account_default_when_model_is_unset(self):
+        self.assertIn("Account default", self.page)
+
+    def test_links_to_design_for_editing_assignments(self):
+        self.assertIn('href="/design"', self.page)
+
+    def test_documents_provider_enable_disable_as_unavailable(self):
+        self.assertIn("enable", self.page.lower())
+        self.assertIn("Design", self.page)
+
+
 if __name__ == "__main__":
     unittest.main()
