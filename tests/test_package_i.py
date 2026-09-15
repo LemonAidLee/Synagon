@@ -195,5 +195,40 @@ class TestAppInfoRoute(_SettingsDaemonCase):
         self.assertTrue(body["config_valid"])
 
 
+class TestPrunePlanRoute(_SettingsDaemonCase):
+    def test_get_uses_preference_defaults_when_no_query_given(self):
+        fake_plan = {"available": True, "total": 0, "prunable": [], "kept": []}
+        with patch("orchestrator.prune.plan_prune", return_value=fake_plan) as mock_plan:
+            status, body = self._get("/api/prune/plan")
+        self.assertEqual(status, 200)
+        self.assertTrue(body["available"])
+        mock_plan.assert_called_once()
+        self.assertEqual(mock_plan.call_args.args[1], 30 * 86400)
+
+    def test_get_honors_query_overrides(self):
+        with patch("orchestrator.prune.plan_prune", return_value={"available": True}) as mock_plan:
+            status, _ = self._get("/api/prune/plan?older_than_days=7&keep_failed=0")
+        self.assertEqual(status, 200)
+        self.assertEqual(mock_plan.call_args.args[1], 7 * 86400)
+        self.assertFalse(mock_plan.call_args.kwargs["keep_failed"])
+
+
+class TestPruneExecuteRoute(_SettingsDaemonCase):
+    def test_post_passes_the_plan_through_unchanged(self):
+        plan = {"available": True, "prunable": [{"branch": "run/x"}]}
+        with patch(
+            "orchestrator.prune.execute_prune", return_value={"deleted": [], "failed": []}
+        ) as mock_exec:
+            status, body = self._post("/api/prune/execute", {"plan": plan})
+        self.assertEqual(status, 200)
+        mock_exec.assert_called_once()
+        self.assertEqual(mock_exec.call_args.args[1], plan)
+
+    def test_post_without_a_plan_is_a_400(self):
+        status, body = self._post("/api/prune/execute", {})
+        self.assertEqual(status, 400)
+        self.assertFalse(body["ok"])
+
+
 if __name__ == "__main__":
     unittest.main()

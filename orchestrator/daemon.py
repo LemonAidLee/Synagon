@@ -331,6 +331,28 @@ class Daemon:
 
         return {"providers": check_all_providers()}
 
+    def prune_plan(self, older_than_seconds: int, keep_failed: bool) -> Dict[str, Any]:
+        """What `--prune-runs --dry-run` would show. Never deletes anything."""
+        from orchestrator.config import get_delivery_config
+        from orchestrator.prune import plan_prune
+
+        return plan_prune(
+            self.project_root,
+            older_than_seconds,
+            keep_failed=keep_failed,
+            deliveries_directory=get_delivery_config(self.config).get("directory"),
+        )
+
+    def prune_execute(self, plan: Dict[str, Any]) -> Dict[str, Any]:
+        """Delete exactly the branches `plan` marked prunable. Never computes its own plan."""
+        from orchestrator.config import get_delivery_config
+        from orchestrator.prune import execute_prune
+
+        return execute_prune(
+            self.project_root, plan,
+            deliveries_directory=get_delivery_config(self.config).get("directory"),
+        )
+
     def doctor_report(self) -> Dict[str, Any]:
         """The same probe `--doctor` runs, for the settings page's diagnostics panel."""
         from orchestrator.config import get_preflight_config
@@ -1092,6 +1114,32 @@ def make_daemon_handler(daemon: "Daemon", port: int):
                 )
                 return
 
+            if route == "/api/prune/plan":
+                from orchestrator.preferences import load_preferences
+
+                query = parse_qs(urlparse(self.path).query)
+                prefs = load_preferences()
+                try:
+                    older_days = int(
+                        (query.get("older_than_days") or [str(prefs["prune_default_max_age_days"])])[0]
+                    )
+                except ValueError:
+                    older_days = prefs["prune_default_max_age_days"]
+                keep_failed_param = (query.get("keep_failed") or [None])[0]
+                keep_failed = (
+                    prefs["prune_default_keep_failed"]
+                    if keep_failed_param is None
+                    else keep_failed_param in ("1", "true")
+                )
+                try:
+                    self._send(
+                        _json_bytes(daemon.prune_plan(older_days * 86400, keep_failed)),
+                        "application/json",
+                    )
+                except Exception as exc:
+                    self._send(_json_bytes({"error": str(exc)}), "application/json", status=500)
+                return
+
             if route == "/api/terminals":
                 self._send(
                     _json_bytes({"terminals": daemon.terminals.listing()}), "application/json"
@@ -1338,6 +1386,25 @@ def make_daemon_handler(daemon: "Daemon", port: int):
                 self._send(
                     _json_bytes(result), "application/json", status=200 if result.get("ok") else 400
                 )
+                return
+
+            if route == "/api/prune/execute":
+                payload = self._read_json()
+                if payload is None:
+                    return
+                plan = payload.get("plan")
+                if not isinstance(plan, dict):
+                    self._send(
+                        _json_bytes({"ok": False, "error": "a prune plan was expected"}),
+                        "application/json",
+                        status=400,
+                    )
+                    return
+                try:
+                    result = daemon.prune_execute(plan)
+                    self._send(_json_bytes(result), "application/json")
+                except Exception as exc:
+                    self._send(_json_bytes({"ok": False, "error": str(exc)}), "application/json", 500)
                 return
 
             if not route.startswith("/api/control/"):
