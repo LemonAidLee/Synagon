@@ -161,5 +161,29 @@ class TestAppearanceSection(unittest.TestCase):
         self.assertIn("window.__applyTheme", self.page)
 
 
+class TestWorkspaceSection(unittest.TestCase):
+    def setUp(self):
+        self.page = (WEB_DIR / "settings.html").read_text(encoding="utf-8")
+
+    def test_has_default_dir_and_startup_view_controls(self):
+        self.assertIn('id="workspace-default-dir"', self.page)
+        self.assertIn('id="workspace-startup-view"', self.page)
+
+    def test_recent_projects_is_documented_as_unavailable(self):
+        self.assertIn('Recent projects', self.page)
+        self.assertIn('unavailable-note', self.page)
+
+    def test_has_a_preview_before_a_delete_button(self):
+        preview_pos = self.page.index('id="prune-preview-btn"')
+        delete_pos = self.page.index('id="prune-delete-btn"')
+        self.assertLess(preview_pos, delete_pos)
+        # The delete control must not be usable before a plan exists.
+        self.assertIn('id="prune-delete-btn" disabled', self.page)
+
+    def test_prune_execute_sends_the_previewed_plan(self):
+        self.assertIn('/api/prune/plan', self.page)
+        self.assertIn('/api/prune/execute', self.page)
+
+
 if __name__ == "__main__":
     unittest.main()

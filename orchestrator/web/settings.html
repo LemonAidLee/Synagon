@@ -284,7 +284,55 @@ pre.report {
         </section>
 
         <section class="tab-panel" id="tab-workspace" role="tabpanel" aria-labelledby="tabbtn-workspace">
-            <!-- Task 10 -->
+            <div class="settings-group">
+                <h2>Workspace</h2>
+                <div class="field-row">
+                    <span class="field-label">Default project directory
+                        <span class="hint">Used as the starting folder for File &gt; Open Project Folder…</span>
+                    </span>
+                    <input type="text" id="workspace-default-dir" placeholder="(none set)">
+                </div>
+                <div class="field-row">
+                    <span class="field-label">Startup view</span>
+                    <select id="workspace-startup-view">
+                        <option value="cockpit">Cockpit</option>
+                        <option value="office">Office</option>
+                        <option value="design">Design</option>
+                    </select>
+                </div>
+                <p class="unavailable-note">
+                    Recent projects: unavailable — Synagon does not currently track which
+                    projects were opened previously, so there is nothing for this list to read.
+                </p>
+                <span class="save-status" id="workspace-status"></span>
+            </div>
+
+            <div class="settings-group">
+                <h2>Branch &amp; worktree cleanup</h2>
+                <p class="unavailable-note" style="margin-top:-6px;">
+                    A run's worktree is always removed when the run ends. This only concerns the
+                    branches those runs leave behind — nothing is ever deleted without you
+                    previewing the exact list first and confirming.
+                </p>
+                <div class="field-row">
+                    <span class="field-label">Only consider branches older than
+                        <span class="hint">days</span>
+                    </span>
+                    <input type="number" id="prune-age-days" min="0" step="1">
+                </div>
+                <div class="field-row">
+                    <span class="field-label">Keep branches whose run did not succeed</span>
+                    <input type="checkbox" id="prune-keep-failed">
+                </div>
+                <div class="field-row">
+                    <button id="prune-preview-btn">Preview cleanup</button>
+                </div>
+                <div id="prune-plan-output"></div>
+                <div class="field-row">
+                    <button id="prune-delete-btn" disabled class="danger">Delete 0 branches</button>
+                </div>
+                <span class="save-status" id="prune-status"></span>
+            </div>
         </section>
 
         <section class="tab-panel" id="tab-agents" role="tabpanel" aria-labelledby="tabbtn-agents">
@@ -541,8 +589,99 @@ pre.report {
         }
     });
 
+    // -- Workspace section ------------------------------------------------------------------
+    let lastPrunePlan = null;
+
+    async function initWorkspace() {
+        let prefs;
+        try {
+            prefs = await apiGet('/api/preferences');
+        } catch (err) {
+            showError('Could not load preferences: ' + err.message);
+            return;
+        }
+        document.getElementById('workspace-default-dir').value = prefs.default_workspace_dir || '';
+        document.getElementById('workspace-startup-view').value = prefs.startup_view;
+        document.getElementById('prune-age-days').value = prefs.prune_default_max_age_days;
+        document.getElementById('prune-keep-failed').checked = !!prefs.prune_default_keep_failed;
+
+        document.getElementById('workspace-default-dir').addEventListener('change', async (e) => {
+            try {
+                await apiSavePreferences({ default_workspace_dir: e.target.value || null });
+                flashStatus('workspace-status', true, 'Saved');
+            } catch (err) {
+                flashStatus('workspace-status', false, 'Could not save');
+            }
+        });
+        document.getElementById('workspace-startup-view').addEventListener('change', async (e) => {
+            try {
+                await apiSavePreferences({ startup_view: e.target.value });
+                flashStatus('workspace-status', true, 'Saved');
+            } catch (err) {
+                flashStatus('workspace-status', false, 'Could not save');
+            }
+        });
+        document.getElementById('prune-age-days').addEventListener('change', (e) => {
+            apiSavePreferences({ prune_default_max_age_days: parseInt(e.target.value, 10) }).catch(() => {});
+        });
+        document.getElementById('prune-keep-failed').addEventListener('change', (e) => {
+            apiSavePreferences({ prune_default_keep_failed: e.target.checked }).catch(() => {});
+        });
+
+        document.getElementById('prune-preview-btn').addEventListener('click', previewPrune);
+        document.getElementById('prune-delete-btn').addEventListener('click', executePrune);
+    }
+
+    async function previewPrune() {
+        const days = document.getElementById('prune-age-days').value;
+        const keepFailed = document.getElementById('prune-keep-failed').checked ? '1' : '0';
+        const output = document.getElementById('prune-plan-output');
+        const deleteBtn = document.getElementById('prune-delete-btn');
+        output.textContent = 'Loading…';
+        deleteBtn.disabled = true;
+        deleteBtn.textContent = 'Delete 0 branches';
+        try {
+            lastPrunePlan = await apiGet(`/api/prune/plan?older_than_days=${encodeURIComponent(days)}&keep_failed=${keepFailed}`);
+            if (!lastPrunePlan.available) {
+                output.textContent = 'Cannot preview: ' + (lastPrunePlan.reason || 'unknown reason');
+                return;
+            }
+            const prunable = lastPrunePlan.prunable || [];
+            output.innerHTML = prunable.length
+                ? '<pre class="report">' + escapeHtml(prunable.map((c) => c.branch).join('\n')) + '</pre>'
+                : '<p class="unavailable-note">Nothing to prune.</p>';
+            deleteBtn.disabled = prunable.length === 0;
+            deleteBtn.textContent = `Delete ${prunable.length} branch${prunable.length === 1 ? '' : 'es'}`;
+        } catch (err) {
+            output.textContent = 'Could not load a plan: ' + err.message;
+        }
+    }
+
+    async function executePrune() {
+        if (!lastPrunePlan) return;
+        const deleteBtn = document.getElementById('prune-delete-btn');
+        deleteBtn.disabled = true;
+        try {
+            const res = await fetch('/api/prune/execute', {
+                method: 'POST',
+                headers: { 'X-Orchestrator-Token': TOKEN, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ plan: lastPrunePlan }),
+            });
+            const result = await res.json();
+            const deleted = (result.deleted || []).length;
+            flashStatus('prune-status', true, `Deleted ${deleted} branch${deleted === 1 ? '' : 'es'}`);
+            lastPrunePlan = null;
+            document.getElementById('prune-plan-output').textContent = '';
+            deleteBtn.textContent = 'Delete 0 branches';
+        } catch (err) {
+            flashStatus('prune-status', false, 'Could not delete: ' + err.message);
+            deleteBtn.disabled = false;
+        }
+    }
+
     // -- Boot -------------------------------------------------------------------------------
     initAppearance();
+    initWorkspace();
     loadProviders();
     </script>
 </body>
