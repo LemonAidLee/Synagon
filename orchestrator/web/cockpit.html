@@ -1137,6 +1137,28 @@ body.terminals-hidden .terminals-area, body.terminals-hidden #splitter-terminals
         return `${(known / 1000).toFixed(1)}K${t && !t.complete ? '+' : ''}`;
     }
 
+    // How the status bar draws TOKENS (Package I's `budget_display`, per machine). All three
+    // states are real and distinct - an exact figure with what retries cost, a rounded total,
+    // or nothing shown - and none of them changes a ceiling: `budget.*` in orchestrator.yaml is
+    // what actually stops a run, and this only decides what you are told about the spend.
+    // Read once at boot from the same /api/preferences call the theme uses, because this runs
+    // inside the fast refresh loop and must not add a request per tick.
+    let budgetDisplayMode = 'compact';
+
+    function statusTokenLabel(cardSum) {
+        if (budgetDisplayMode !== 'detailed') return `TOKENS ${runTokenLabel(cardSum)}`;
+        const t = state.cockpit && state.cockpit.run_tokens;
+        const known = t ? t.known : cardSum;
+        // Same "+ means this is a floor" convention as runTokenLabel: some execution
+        // reported no token count, so the true total is at least this.
+        const floor = t && !t.complete ? '+' : '';
+        const failed = t && t.failed_attempts ? t.failed_attempts : 0;
+        const wasted = failed
+            ? ` (${failed} failed attempt${failed === 1 ? '' : 's'}: ${(t.failed_attempt_tokens || 0).toLocaleString()})`
+            : '';
+        return `TOKENS ${known.toLocaleString()}${floor}${wasted}`;
+    }
+
     // 6. RENDER: PIPELINE
     function renderPipeline() {
         if (!state.cockpit || !state.cockpit.columns) return;
@@ -1454,7 +1476,12 @@ body.terminals-hidden .terminals-area, body.terminals-hidden #splitter-terminals
             col.agents.forEach(a => totalTokens += a.tokens || 0);
         });
         DOM.statusAgents.innerText = `AGENTS ${totalAgents.toString().padStart(2, '0')}`;
-        DOM.statusTokens.innerText = `TOKENS ${runTokenLabel(totalTokens)}`;
+        if (budgetDisplayMode === 'hidden') {
+            DOM.statusTokens.style.display = 'none';
+        } else {
+            DOM.statusTokens.style.display = '';
+            DOM.statusTokens.innerText = statusTokenLabel(totalTokens);
+        }
         
         DOM.statusApprovals = document.getElementById('status-approvals');
         if (DOM.statusApprovals) {
@@ -2574,7 +2601,8 @@ body.terminals-hidden .terminals-area, body.terminals-hidden #splitter-terminals
         try {
             const prefs = await apiGet('/api/preferences');
             if (prefs && prefs.theme) initialTheme = prefs.theme;
-        } catch (err) { /* keep the default */ }
+            if (prefs && prefs.budget_display) budgetDisplayMode = prefs.budget_display;
+        } catch (err) { /* keep the defaults */ }
         window.__applyTheme(initialTheme, { persist: false });
         if (DOM.themeSelect) {
             DOM.themeSelect.addEventListener('change', (e) => window.__applyTheme(e.target.value));

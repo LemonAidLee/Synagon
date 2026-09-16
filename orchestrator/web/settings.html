@@ -359,11 +359,129 @@ pre.report {
         </section>
 
         <section class="tab-panel" id="tab-execution" role="tabpanel" aria-labelledby="tabbtn-execution">
-            <!-- Task 12 -->
+            <div class="settings-group">
+                <h2>Execution</h2>
+                <p class="unavailable-note" style="margin-top:-6px;">
+                    Saved to <code>orchestrator.yaml</code> as soon as you change it, and read by
+                    the next goal you start &mdash; no daemon restart needed. A run already in
+                    flight keeps the values it started with.
+                </p>
+                <div class="field-row">
+                    <span class="field-label">Default execution mode
+                        <span class="hint">how each agent is launched</span>
+                    </span>
+                    <select id="execution-mode">
+                        <option value="auto">Auto</option>
+                        <option value="native_tui">Native TUI</option>
+                        <option value="headless">Headless</option>
+                    </select>
+                </div>
+                <div class="field-row">
+                    <span class="field-label">Retry attempts
+                        <span class="hint">1&ndash;10; 1 disables retrying</span>
+                    </span>
+                    <input type="number" id="execution-retry-attempts" min="1" max="10" step="1">
+                </div>
+                <div class="field-row">
+                    <span class="field-label">Repair-attempt limit
+                        <span class="hint">0 or more</span>
+                    </span>
+                    <input type="number" id="execution-repair-attempts" min="0" step="1">
+                </div>
+                <div class="field-row">
+                    <span class="field-label">Escalate to a different model on retry
+                        <span class="hint">only where a model ladder is configured</span>
+                    </span>
+                    <input type="checkbox" id="execution-escalate">
+                </div>
+                <div class="field-row">
+                    <span class="field-label">Session duration ceiling
+                        <span class="hint">seconds; 0 = unlimited</span>
+                    </span>
+                    <input type="number" id="execution-session-duration" min="0" step="1">
+                </div>
+                <div class="field-row">
+                    <span class="field-label">Goal duration ceiling
+                        <span class="hint">seconds; 0 = unlimited</span>
+                    </span>
+                    <input type="number" id="execution-goal-duration" min="0" step="1">
+                </div>
+                <span class="save-status" id="execution-status"></span>
+            </div>
+
+            <div class="settings-group">
+                <h2>Budget display</h2>
+                <p class="unavailable-note" style="margin-top:-6px;">
+                    This machine only &mdash; it controls how the cockpit's token counter is
+                    drawn. It does not change enforcement: the two duration ceilings above are
+                    what actually stop a run, whichever display you pick here.
+                </p>
+                <div class="field-row">
+                    <span class="field-label">Cockpit token counter</span>
+                    <select id="execution-budget-display">
+                        <option value="detailed">Detailed &mdash; exact count, and failed-attempt spend</option>
+                        <option value="compact">Compact &mdash; rounded total</option>
+                        <option value="hidden">Hidden</option>
+                    </select>
+                </div>
+                <span class="save-status" id="budget-display-status"></span>
+            </div>
         </section>
 
         <section class="tab-panel" id="tab-terminal" role="tabpanel" aria-labelledby="tabbtn-terminal">
-            <!-- Task 12 -->
+            <div class="settings-group">
+                <h2>Terminal &amp; Desktop</h2>
+                <p class="unavailable-note" style="margin-top:-6px;">
+                    Saved to <code>orchestrator.yaml</code> as soon as you change it, and read by
+                    the next goal you start &mdash; no daemon restart needed.
+                </p>
+                <div class="field-row">
+                    <span class="field-label">Show agent terminals
+                        <span class="hint">open a terminal surface for each agent as it runs</span>
+                    </span>
+                    <input type="checkbox" id="terminal-visible">
+                </div>
+                <div class="field-row">
+                    <span class="field-label">Terminal type
+                        <span class="hint">Auto picks what this machine actually has</span>
+                    </span>
+                    <select id="terminal-type">
+                        <option value="auto">Auto</option>
+                        <option value="antigravity_integrated">Antigravity integrated</option>
+                        <option value="integrated">Integrated</option>
+                        <option value="windows_terminal">Windows Terminal</option>
+                        <option value="console">Console</option>
+                        <option value="wt">wt</option>
+                        <option value="cmd">cmd</option>
+                        <option value="none">None</option>
+                    </select>
+                </div>
+                <p class="unavailable-note">
+                    <strong>Native TUI</strong> is the same field as Execution's &ldquo;Default
+                    execution mode&rdquo; (its <code>native_tui</code> value) &mdash; not a second,
+                    separate switch, so it is not repeated here. Whether it is honored for a given
+                    agent still depends on that provider's own capability: a provider with no
+                    native TUI runs headless regardless of this setting.
+                </p>
+                <div class="field-row">
+                    <span class="field-label">Output detail kept per run
+                        <span class="hint">how much of each agent's output the run store retains</span>
+                    </span>
+                    <select id="terminal-output-verbosity">
+                        <option value="0">Full detail &mdash; keep everything</option>
+                        <option value="20000">Standard &mdash; 20,000 characters</option>
+                        <option value="4000">Compact &mdash; 4,000 characters</option>
+                    </select>
+                </div>
+                <p class="unavailable-note">
+                    <strong>Detached login</strong> (the Login buttons on the Agents &amp;
+                    Providers tab) is fixed and has no setting, by design: each provider's own
+                    login runs in its own detached terminal that Synagon starts and then never
+                    waits on, reads from, or kills. Your credentials stay between you and that
+                    provider's CLI.
+                </p>
+                <span class="save-status" id="terminal-status"></span>
+            </div>
         </section>
 
         <section class="tab-panel" id="tab-safety" role="tabpanel" aria-labelledby="tabbtn-safety">
@@ -706,11 +824,119 @@ pre.report {
         }
     }
 
+    // -- Execution and Terminal & Desktop: project-level, via /api/settings --------------------
+    // One map, because every field here is the same shape of thing: an element whose value is
+    // one named setting in `orchestrator.yaml`. The daemon validates each one again before it
+    // writes, so this side never has to be the only thing standing between a typo and the file.
+    const SETTINGS_FIELDS = {
+        'execution-mode': 'execution.agent_execution_mode',
+        'execution-retry-attempts': 'execution.retry.attempts',
+        'execution-repair-attempts': 'max_repair_attempts',
+        'execution-escalate': 'execution.retry.escalate_model',
+        'execution-session-duration': 'budget.max_duration_seconds',
+        'execution-goal-duration': 'budget.goal_max_duration_seconds',
+        'terminal-visible': 'execution.visible_terminals',
+        'terminal-type': 'execution.terminal_type',
+        'terminal-output-verbosity': 'run_store.max_output_chars',
+    };
+
+    //: Fields whose value is a number even though the control reports a string. A `<select>`
+    //: is in here too: its options are character counts, and the config field is an integer.
+    const NUMERIC_SETTINGS_FIELDS = [
+        'execution-retry-attempts', 'execution-repair-attempts',
+        'execution-session-duration', 'execution-goal-duration',
+        'terminal-output-verbosity',
+    ];
+
+    function readSettingsField(elementId) {
+        const el = document.getElementById(elementId);
+        if (el.type === 'checkbox') return el.checked;
+        if (NUMERIC_SETTINGS_FIELDS.indexOf(elementId) !== -1) {
+            // An emptied number input reads as '', and parseInt('') is NaN, which JSON encodes
+            // as null - a value the daemon would reject with a message about the wrong type
+            // rather than the real problem. Caught here so the message names it.
+            const parsed = parseInt(el.value, 10);
+            if (Number.isNaN(parsed)) throw new Error('Enter a number.');
+            return parsed;
+        }
+        return el.value;
+    }
+
+    async function saveSettingsField(elementId, statusId) {
+        const name = SETTINGS_FIELDS[elementId];
+        try {
+            const result = await apiSaveSettings({ [name]: readSettingsField(elementId) });
+            if (result.ok === false) {
+                throw new Error((result.problems || [result.error || 'not saved']).join(' '));
+            }
+            flashStatus(statusId, true, 'Saved');
+        } catch (err) {
+            flashStatus(statusId, false, err.message);
+        }
+    }
+
+    async function initExecutionAndTerminal() {
+        let settings;
+        try {
+            settings = await apiGet('/api/settings');
+        } catch (err) {
+            showError('Could not load project settings: ' + err.message);
+            return;
+        }
+        // `String(...)` for the selects: a `<select>`'s value is always a string, and the
+        // character-count options ("0", "20000") come back from the config as integers.
+        const assign = {
+            'execution-mode': String(settings['execution.agent_execution_mode']),
+            'execution-retry-attempts': settings['execution.retry.attempts'],
+            'execution-repair-attempts': settings['max_repair_attempts'],
+            'execution-session-duration': settings['budget.max_duration_seconds'],
+            'execution-goal-duration': settings['budget.goal_max_duration_seconds'],
+            'terminal-type': String(settings['execution.terminal_type']),
+            'terminal-output-verbosity': String(settings['run_store.max_output_chars']),
+        };
+        for (const [elementId, value] of Object.entries(assign)) {
+            document.getElementById(elementId).value = value;
+        }
+        document.getElementById('execution-escalate').checked =
+            !!settings['execution.retry.escalate_model'];
+        document.getElementById('terminal-visible').checked =
+            !!settings['execution.visible_terminals'];
+
+        for (const elementId of Object.keys(SETTINGS_FIELDS)) {
+            const statusId = elementId.indexOf('terminal-') === 0 ? 'terminal-status' : 'execution-status';
+            document.getElementById(elementId).addEventListener(
+                'change', () => saveSettingsField(elementId, statusId)
+            );
+        }
+    }
+
+    // -- Budget display: this machine only, and display-only ------------------------------------
+    // Deliberately not a /api/settings field: it changes how the cockpit draws a number, not
+    // what any ceiling is, so it belongs with theme and density rather than in the project file.
+    async function initBudgetDisplay() {
+        const select = document.getElementById('execution-budget-display');
+        try {
+            const prefs = await apiGet('/api/preferences');
+            if (prefs && prefs.budget_display) select.value = prefs.budget_display;
+        } catch (err) { /* leave whichever option the markup selected */ }
+        select.addEventListener('change', async (e) => {
+            try {
+                const result = await apiSavePreferences({ budget_display: e.target.value });
+                if (result.ok === false) throw new Error(result.error || 'not saved');
+                flashStatus('budget-display-status', true, 'Saved \u2014 reload the cockpit to see it');
+            } catch (err) {
+                flashStatus('budget-display-status', false, err.message);
+            }
+        });
+    }
+
     // -- Boot -------------------------------------------------------------------------------
     initAppearance();
     initWorkspace();
     loadProviders();
     loadTeamSummary();
+    initExecutionAndTerminal();
+    initBudgetDisplay();
     </script>
 </body>
 </html>

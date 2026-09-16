@@ -203,5 +203,73 @@ class TestAgentsProvidersSection(unittest.TestCase):
         self.assertIn("Design", self.page)
 
 
+class TestExecutionSection(unittest.TestCase):
+    def setUp(self):
+        self.page = (WEB_DIR / "settings.html").read_text(encoding="utf-8")
+
+    def test_has_the_execution_fields(self):
+        for field_id in (
+            "execution-mode", "execution-retry-attempts", "execution-repair-attempts",
+            "execution-escalate", "execution-session-duration", "execution-goal-duration",
+        ):
+            self.assertIn(f'id="{field_id}"', self.page)
+
+    def test_saves_through_settings_api(self):
+        self.assertIn("apiSaveSettings", self.page)
+
+    def test_offers_only_the_execution_modes_the_engine_supports(self):
+        for mode in ("auto", "native_tui", "headless"):
+            self.assertIn(f'value="{mode}"', self.page)
+
+    def test_labels_zero_duration_as_unlimited(self):
+        self.assertIn("0 = unlimited", self.page)
+
+    def test_budget_display_is_a_preference_not_a_setting(self):
+        self.assertIn('id="execution-budget-display"', self.page)
+        self.assertIn("does not change enforcement", self.page.lower())
+
+
+class TestTerminalDesktopSection(unittest.TestCase):
+    def setUp(self):
+        self.page = (WEB_DIR / "settings.html").read_text(encoding="utf-8")
+
+    def test_has_visibility_and_terminal_type(self):
+        self.assertIn('id="terminal-visible"', self.page)
+        self.assertIn('id="terminal-type"', self.page)
+
+    def test_notes_native_tui_is_the_execution_mode_field(self):
+        self.assertIn("same field", self.page.lower())
+
+    def test_has_output_verbosity_mapped_to_run_store(self):
+        self.assertIn('id="terminal-output-verbosity"', self.page)
+        self.assertIn("run_store.max_output_chars", self.page)
+
+    def test_documents_detached_login_as_read_only(self):
+        self.assertIn("detached", self.page.lower())
+
+    def test_offers_every_terminal_type_the_config_accepts(self):
+        from orchestrator.settings_patch import SETTINGS_FIELDS
+
+        spec = SETTINGS_FIELDS["execution.terminal_type"]
+        for candidate in (
+            "auto", "antigravity_integrated", "integrated", "windows_terminal",
+            "console", "wt", "cmd", "none",
+        ):
+            self.assertTrue(spec["validate"](candidate))
+            self.assertIn(f'value="{candidate}"', self.page)
+
+
+class TestCockpitBudgetDisplay(unittest.TestCase):
+    def setUp(self):
+        self.page = (WEB_DIR / "cockpit.html").read_text(encoding="utf-8")
+
+    def test_status_tokens_honors_budget_display_preference(self):
+        self.assertIn("budget_display", self.page)
+
+    def test_hidden_mode_hides_the_counter(self):
+        self.assertIn("budgetDisplayMode", self.page)
+        self.assertIn("'hidden'", self.page)
+
+
 if __name__ == "__main__":
     unittest.main()
