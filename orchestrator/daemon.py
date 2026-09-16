@@ -1121,13 +1121,22 @@ def make_daemon_handler(daemon: "Daemon", port: int):
                 return
 
             if route == "/api/app_info":
-                from orchestrator.config import ConfigValidationError, validate_config
+                # The file as written, not `daemon.config`. `load_config` materializes every
+                # optional key it did not find - `planning.agent: None` among them - and
+                # `validate_config` reads a literal None there as an agent *named* "None" and
+                # rejects it, so validating the resolved dict told anyone with a perfectly
+                # good orchestrator.yaml that their configuration was invalid. Reading the
+                # file also makes this answer the question the page actually asks, and makes
+                # it agree with `settings_patch.write_settings`, which checks the same text
+                # before it saves.
+                from orchestrator.settings_patch import check_settings_text
+                from orchestrator.teams import config_file_path
 
-                valid, error = True, None
+                path = config_file_path(daemon.project_root, daemon.config_path)
                 try:
-                    validate_config(daemon.config)
-                except ConfigValidationError as exc:
-                    valid, error = False, str(exc)
+                    valid, error = check_settings_text(path.read_text(encoding="utf-8"))
+                except OSError as exc:
+                    valid, error = False, "could not read %s: %s" % (path, exc)
                 self._send(
                     _json_bytes(
                         {"version": app_version(), "config_valid": valid, "config_error": error}

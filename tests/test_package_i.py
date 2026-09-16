@@ -188,20 +188,67 @@ class TestDiagnosticsRoute(_SettingsDaemonCase):
 
 
 class TestAppInfoRoute(_SettingsDaemonCase):
-    def test_get_reports_version_and_validity(self):
-        # _SettingsDaemonCase's shared fixture config ({"agents": [], "roles": {}}) is
-        # deliberately minimal for routes that don't validate it, but an empty 'agents'
-        # list genuinely fails validate_config (see orchestrator/config.py). Swap in a
-        # minimal but valid config here so this test exercises the true "valid" path
-        # without touching the shared fixture other test classes rely on.
-        self.daemon.config = {
-            "agents": [{"agent": "claude", "role": "implementer"}],
-            "roles": {},
-        }
+    def test_get_reports_the_version_even_with_no_config_file(self):
+        # The temp project root has no orchestrator.yaml. The version is a fact about the
+        # application, so it is still reported; the configuration is called invalid, with a
+        # reason that names the file rather than a bare traceback.
         status, body = self._get("/api/app_info")
         self.assertEqual(status, 200)
-        self.assertIn("version", body)
-        self.assertTrue(body["config_valid"])
+        self.assertTrue(body["version"])
+        self.assertFalse(body["config_valid"])
+        self.assertIn("orchestrator.yaml", body["config_error"])
+
+    def test_a_valid_config_file_is_not_reported_invalid(self):
+        """The config the daemon holds is `load_config`'s output, not the file as written.
+
+        `load_config` materializes optional keys it did not find - `planning.agent: None`
+        among them - and `validate_config` reads a literal None there as an agent named
+        "None" and rejects it. Validating that dict told everyone with a perfectly good
+        orchestrator.yaml that their configuration was invalid. This asserts on the real
+        production path: a file on disk, and the config the daemon was handed from it.
+        """
+        from orchestrator.config import load_config
+
+        path = os.path.join(self.root, "orchestrator.yaml")
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(
+                "agents:\n"
+                "  - agent: claude\n"
+                "    role: implementer\n"
+                "roles:\n"
+                "  implementer:\n"
+                "    responsibility: Write the code.\n"
+                "planning:\n"
+                "  max_tasks: 12\n"
+            )
+        self.daemon.config = load_config(path)
+        self.daemon.config_path = path
+
+        status, body = self._get("/api/app_info")
+        self.assertEqual(status, 200)
+        self.assertTrue(
+            body["config_valid"],
+            "a valid orchestrator.yaml was reported invalid: %s" % body.get("config_error"),
+        )
+        self.assertIsNone(body["config_error"])
+
+    def test_an_invalid_config_file_is_reported_with_its_reason(self):
+        path = os.path.join(self.root, "orchestrator.yaml")
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(
+                "agents:\n"
+                "  - agent: not_a_provider\n"
+                "    role: implementer\n"
+                "roles:\n"
+                "  implementer:\n"
+                "    responsibility: Write the code.\n"
+            )
+        self.daemon.config_path = path
+
+        status, body = self._get("/api/app_info")
+        self.assertEqual(status, 200)
+        self.assertFalse(body["config_valid"])
+        self.assertIn("not_a_provider", body["config_error"])
 
 
 class TestPrunePlanRoute(_SettingsDaemonCase):
