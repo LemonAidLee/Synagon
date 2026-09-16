@@ -308,6 +308,12 @@ class TestSafetyDiagnosticsSection(unittest.TestCase):
                        "client_secret", "private_key", ".netrc", "authorization:"):
             self.assertNotIn(banned, lowered, f"{banned!r} must never appear on this page")
 
+    def test_status_messages_cancel_their_previous_timer(self):
+        # Without this, an earlier "Saved" clears a later error message early - the reason a
+        # refused edit briefly lost its only explanation when driven from a browser.
+        page = (WEB_DIR / "settings.html").read_text(encoding="utf-8")
+        self.assertIn("clearTimeout(statusTimers.get(elementId))", page)
+
     def test_has_no_input_that_could_collect_a_secret(self):
         self.assertNotIn('type="password"', self.page)
 

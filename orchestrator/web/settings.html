@@ -603,12 +603,23 @@ pre.report {
         return div.innerHTML;
     }
 
+    // Each status line owns its clear-timer. Without cancelling the previous one, a "Saved"
+    // from 2.4s ago clears the error that replaced it, and a refused edit's only explanation
+    // disappears a fraction of a second after it appears - which is how it looked when this
+    // was first driven from a browser.
+    const statusTimers = new Map();
+
     function flashStatus(elementId, ok, message) {
         const el = document.getElementById(elementId);
         if (!el) return;
+        clearTimeout(statusTimers.get(elementId));
         el.textContent = message;
         el.className = 'save-status ' + (ok ? 'ok' : 'err');
-        setTimeout(() => { el.textContent = ''; el.className = 'save-status'; }, 2500);
+        statusTimers.set(elementId, setTimeout(() => {
+            el.textContent = '';
+            el.className = 'save-status';
+            statusTimers.delete(elementId);
+        }, ok ? 2500 : 8000));  // an error is worth longer than a confirmation
     }
 
     // -- Tabs: click and left/right-arrow, per the ARIA tablist pattern -----------------------
