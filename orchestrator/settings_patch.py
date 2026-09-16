@@ -130,15 +130,33 @@ def _set_path(node: Dict[str, Any], path: Tuple[str, ...], value: Any) -> None:
         node[path[-1]] = value
 
 
+def _scalar(value: Any) -> str:
+    """One config value as YAML writes it, not as Python prints it.
+
+    `f"{True}"` is "True", and `f"{None}"` is "None" - Python's reprs. PyYAML happens to read
+    "True" back as a boolean, so this never broke loading; it just meant every save rewrote
+    unrelated boolean lines in a style nothing else in the file uses, leaving a cosmetic diff
+    on lines nobody had touched. "None" is worse: YAML reads it as the *string* "None".
+
+    Delegated to PyYAML rather than hand-written, so the quoting rules for a string that
+    happens to look like a number, a date, or a keyword are the ones the parser actually uses.
+    """
+    dumped = yaml.safe_dump(value, default_flow_style=True, allow_unicode=True).strip()
+    # safe_dump ends a bare scalar document with "\n...", and may add the "..." terminator.
+    if dumped.endswith("..."):
+        dumped = dumped[: -len("...")].strip()
+    return dumped
+
+
 def _render_mapping_block(key: str, mapping: Dict[str, Any]) -> str:
     lines = [f"{key}:"]
     for k, v in mapping.items():
         if isinstance(v, dict):
             lines.append(f"  {k}:")
             for k2, v2 in v.items():
-                lines.append(f"    {k2}: {v2}")
+                lines.append(f"    {k2}: {_scalar(v2)}")
         else:
-            lines.append(f"  {k}: {v}")
+            lines.append(f"  {k}: {_scalar(v)}")
     return "\n".join(lines)
 
 
@@ -166,7 +184,7 @@ def apply_settings_to_text(text: str, config: Optional[Dict[str, Any]], patch: D
     if "max_repair_attempts" in touched:
         updated = replace_top_level_block(
             updated, "max_repair_attempts",
-            f"max_repair_attempts: {patch['max_repair_attempts']}",
+            "max_repair_attempts: %s" % _scalar(patch["max_repair_attempts"]),
         )
     return updated
 

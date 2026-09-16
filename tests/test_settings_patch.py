@@ -98,6 +98,58 @@ class SettingsPatchTestCase(unittest.TestCase):
         self.assertTrue(result.get("unchanged"))
         self.assertEqual(self.path.read_text(encoding="utf-8"), text_before)
 
+    def test_booleans_are_written_as_yaml_not_python(self):
+        """`True`/`False` is Python's repr; YAML's is `true`/`false`.
+
+        PyYAML happens to read both, so this never broke loading - it just meant every save
+        rewrote unrelated boolean lines in a style nothing else in the file uses, leaving a
+        cosmetic diff on lines nobody had touched.
+        """
+        result = write_settings(
+            self.root, self.config, {"execution.visible_terminals": True},
+        )
+        self.assertTrue(result["ok"], result.get("error"))
+        text = self.path.read_text(encoding="utf-8")
+        self.assertIn("visible_terminals: true", text)
+        self.assertNotIn("True", text)
+        self.assertNotIn("False", text)
+        self.assertTrue(load_config(str(self.path))["execution"]["visible_terminals"])
+
+    def test_a_false_boolean_is_written_as_false(self):
+        write_settings(self.root, self.config, {"execution.retry.escalate_model": False})
+        text = self.path.read_text(encoding="utf-8")
+        self.assertIn("escalate_model: false", text)
+        self.assertNotIn("False", text)
+        self.assertFalse(load_config(str(self.path))["execution"]["retry"]["escalate_model"])
+
+    def test_writing_one_field_does_not_restyle_the_others(self):
+        """The only lines that change are the ones the patch names."""
+        before = self.path.read_text(encoding="utf-8")
+        write_settings(self.root, self.config, {"execution.agent_execution_mode": "headless"})
+        after = self.path.read_text(encoding="utf-8")
+
+        added = [
+            line for line in after.splitlines()
+            if line not in before.splitlines() and line.strip()
+        ]
+        # `execution:` is absent from MINIMAL_YAML, so the whole resolved block is
+        # materialized here - every added line must still be valid YAML that round-trips.
+        self.assertIn("  agent_execution_mode: headless", added)
+        for line in added:
+            self.assertNotIn(": True", line)
+            self.assertNotIn(": False", line)
+            self.assertNotIn(": None", line)
+
+    def test_an_unset_optional_is_written_as_null(self):
+        """`None` is Python's; YAML reads `None` as the *string* "None", not as empty."""
+        write_settings(self.root, self.config, {"execution.terminal_type": "console"})
+        text = self.path.read_text(encoding="utf-8")
+        self.assertNotIn(": None", text)
+        valid, error = __import__(
+            "orchestrator.settings_patch", fromlist=["check_settings_text"]
+        ).check_settings_text(text)
+        self.assertTrue(valid, error)
+
 
 if __name__ == "__main__":
     unittest.main()
