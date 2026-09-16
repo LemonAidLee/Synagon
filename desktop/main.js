@@ -54,8 +54,25 @@ const REPO_ROOT = path.resolve(__dirname, "..");
 /** One open project: its window, its daemon process, and the folder it was opened on. */
 const projects = new Map(); // window id -> { window, child, projectRoot, port }
 
-const PREFERENCES_PATH = path.join(os.homedir(), ".orchestrator", "preferences.json");
+// The same override `orchestrator/preferences.py` honors. The daemon is spawned as this
+// process's child and inherits its environment, so if the shell ignored the override the two
+// would read different files - the Theme menu showing one thing and the page it themes another.
+function preferencesPath() {
+  return (
+    process.env.ORCHESTRATOR_PREFERENCES_FILE ||
+    path.join(os.homedir(), ".orchestrator", "preferences.json")
+  );
+}
+
 const THEME_IDS = ["theme-srcery", "theme-moonfly", "theme-jellybeans", "theme-tender", "theme-miasma"];
+
+//: Which route each startup_view names. The preference's values are the daemon's
+//: (preferences.STARTUP_VIEWS); the cockpit is served at the root.
+const STARTUP_ROUTES = {
+  cockpit: "/",
+  office: "/office",
+  design: "/design",
+};
 const THEME_LABELS = {
   "theme-srcery": "Srcery",
   "theme-moonfly": "Moonfly",
@@ -67,7 +84,7 @@ const THEME_LABELS = {
 /** Every saved preference, or `{}` if the file does not exist yet or cannot be read. */
 function readPreferences() {
   try {
-    return JSON.parse(fs.readFileSync(PREFERENCES_PATH, "utf-8"));
+    return JSON.parse(fs.readFileSync(preferencesPath(), "utf-8"));
   } catch (err) {
     return {};
   }
@@ -76,11 +93,12 @@ function readPreferences() {
 /** Merge `patch` into the saved preferences and write it back, atomically. Never throws. */
 function writePreferences(patch) {
   const next = { ...readPreferences(), ...patch };
+  const file = preferencesPath();
   try {
-    fs.mkdirSync(path.dirname(PREFERENCES_PATH), { recursive: true });
-    const tmp = PREFERENCES_PATH + ".tmp";
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const tmp = file + ".tmp";
     fs.writeFileSync(tmp, JSON.stringify(next, null, 2), "utf-8");
-    fs.renameSync(tmp, PREFERENCES_PATH);
+    fs.renameSync(tmp, file);
   } catch (err) {
     // The daemon's own /api/preferences route is the source of truth for any open page; a
     // failed write here only means the menu's *next* rebuild still shows the old theme.
@@ -242,7 +260,11 @@ async function openProject(projectRoot) {
 
   try {
     await awaitDaemon(projectRoot, port);
-    await window.loadURL(`http://127.0.0.1:${port}/`);
+    // Which surface a project opens on is the person's choice (Package I's `startup_view`),
+    // not always the cockpit. An unrecognized value falls back to the cockpit rather than
+    // loading nothing, because a window that opens blank is worse than one that opens home.
+    const startup = STARTUP_ROUTES[readPreferences().startup_view] || STARTUP_ROUTES.cockpit;
+    await window.loadURL(`http://127.0.0.1:${port}${startup}`);
     window.show();
   } catch (err) {
     window.show();

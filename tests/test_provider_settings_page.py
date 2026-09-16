@@ -121,6 +121,45 @@ class TestThemeMenu(unittest.TestCase):
         self.assertIn('".orchestrator"', self.source)
         self.assertIn('"preferences.json"', self.source)
 
+    def test_shell_and_daemon_read_the_same_preferences_file(self):
+        """The daemon is this process's child and inherits its environment.
+
+        If the shell ignored the override the daemon honors, the two would read different
+        files - the Theme menu showing one choice and the page it themes another.
+        """
+        from orchestrator import preferences
+
+        self.assertIn(preferences.PREFERENCES_ENV, self.source)
+
+
+class TestDesktopStartupView(unittest.TestCase):
+    """`startup_view` is offered on the Settings page, so something has to act on it.
+
+    It was saved and validated but never read by anything, which made the control on the
+    Workspace tab a switch wired to nothing.
+    """
+
+    def setUp(self):
+        desktop_main = WEB_DIR.parent.parent / "desktop" / "main.js"
+        self.source = desktop_main.read_text(encoding="utf-8")
+
+    def test_the_preference_is_read_when_a_project_opens(self):
+        self.assertIn("readPreferences().startup_view", self.source)
+
+    def test_every_offered_view_has_a_route(self):
+        from orchestrator import preferences
+
+        self.assertIn("STARTUP_ROUTES", self.source)
+        for view in preferences.STARTUP_VIEWS:
+            self.assertIn("%s:" % view, self.source)
+
+    def test_the_window_no_longer_hardcodes_the_cockpit(self):
+        self.assertNotIn("await window.loadURL(`http://127.0.0.1:${port}/`)", self.source)
+        self.assertIn("${port}${startup}", self.source)
+
+    def test_an_unknown_view_falls_back_to_the_cockpit(self):
+        self.assertIn("|| STARTUP_ROUTES.cockpit", self.source)
+
 
 class TestSettingsPageTabs(unittest.TestCase):
     def setUp(self):
