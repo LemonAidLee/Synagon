@@ -122,6 +122,16 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
     font-style: italic;
     margin: 10px 0;
 }
+/* The credential guarantees read as a list of promises, so they are marked up as one -
+   the same dimmed, small type the notes beside every setting use. */
+ul.guarantees {
+    margin: 10px 0 0 0;
+    padding-left: 18px;
+    font-size: 12px;
+    color: var(--text-dim);
+    line-height: 1.6;
+}
+ul.guarantees li { margin-bottom: 6px; }
 pre.report {
     background: var(--bg);
     border: 1px solid var(--dim);
@@ -485,7 +495,59 @@ pre.report {
         </section>
 
         <section class="tab-panel" id="tab-safety" role="tabpanel" aria-labelledby="tabbtn-safety">
-            <!-- Task 13 -->
+            <div class="settings-group">
+                <h2>Credential handling</h2>
+                <p class="unavailable-note" style="margin-top:-6px;">
+                    Read-only &mdash; there is nothing to configure here. This is what Synagon
+                    guarantees.
+                </p>
+                <ul class="guarantees">
+                    <li>Synagon never reads, stores, or transmits a credential, key, or sign-in
+                        artefact of any kind, for any provider.</li>
+                    <li>Signing in always opens that provider's own login flow, in its own
+                        detached terminal. Synagon starts it and then never waits on it, reads
+                        from it, or kills it; whatever you type goes to that provider's CLI.</li>
+                    <li>Provider status is read only from commands each provider documents as
+                        safe and non-interactive. Synagon never inspects a provider's stored
+                        sign-in state directly.</li>
+                    <li>Every provider CLI's output is passed through one redaction filter before
+                        it is shown or written anywhere &mdash; key-shaped, bearer-token-shaped,
+                        and secret-shaped text is replaced, not truncated.</li>
+                    <li>Subscription and entitlement are only ever reported when a provider
+                        itself states them. Synagon never infers or claims a plan or tier.</li>
+                </ul>
+            </div>
+
+            <div class="settings-group">
+                <h2>Doctor and provider checks</h2>
+                <p class="unavailable-note" style="margin-top:-6px;">
+                    Both read the current configuration and this machine; neither changes
+                    anything.
+                </p>
+                <div class="field-row">
+                    <button id="run-doctor-btn">Run Doctor</button>
+                    <button id="check-providers-btn">Check Providers</button>
+                </div>
+                <div id="doctor-output"></div>
+            </div>
+
+            <div class="settings-group">
+                <h2>Diagnostic report</h2>
+                <p class="unavailable-note" style="margin-top:-6px;">
+                    The Doctor probe and provider status as one text report, already redacted by
+                    the filter described above, for you to read or copy if you need to share it.
+                    It is not written to a file and is not sent anywhere.
+                </p>
+                <div class="field-row">
+                    <button id="generate-diagnostics-btn">Generate diagnostic report</button>
+                </div>
+                <div id="diagnostics-output"></div>
+            </div>
+
+            <div class="settings-group">
+                <h2>Application</h2>
+                <div id="app-info">Loading&hellip;</div>
+            </div>
         </section>
     </div>
 
@@ -930,6 +992,66 @@ pre.report {
         });
     }
 
+    // -- Safety, Privacy, Diagnostics -----------------------------------------------------------
+    // Every panel here reads; none of them writes. Doctor and the diagnostic report are the
+    // same generators the CLI's --doctor and --check-providers use, so there is no second
+    // implementation of either to drift from the one people already trust.
+    async function showReport(outputId, route, runningText, failureText) {
+        const out = document.getElementById(outputId);
+        out.textContent = runningText;
+        try {
+            const data = await apiGet(route);
+            if (data.error) throw new Error(data.error);
+            // data.text is redacted provider/preflight output, but it is still text this
+            // process did not author - escaped before it reaches innerHTML, like every other
+            // provider-sourced string on this page.
+            out.innerHTML = '<pre class="report">' + escapeHtml(data.text) + '</pre>';
+        } catch (err) {
+            out.textContent = failureText + err.message;
+        }
+    }
+
+    async function initSafety() {
+        document.getElementById('run-doctor-btn').addEventListener('click', (e) => {
+            e.target.disabled = true;
+            showReport('doctor-output', '/api/doctor', 'Running\u2026', 'Could not run Doctor: ')
+                .finally(() => { e.target.disabled = false; });
+        });
+
+        document.getElementById('generate-diagnostics-btn').addEventListener('click', (e) => {
+            e.target.disabled = true;
+            showReport(
+                'diagnostics-output', '/api/diagnostics',
+                'Generating\u2026 this probes every provider, so it can take a few seconds.',
+                'Could not generate a report: '
+            ).finally(() => { e.target.disabled = false; });
+        });
+
+        // Check Providers is the provider cards' own refresh, not a second implementation of
+        // it: it shows the tab those cards live on and re-reads /api/providers there.
+        document.getElementById('check-providers-btn').addEventListener('click', () => {
+            activateTab('agents');
+            document.getElementById('tabbtn-agents').focus();
+            loadProviders();
+        });
+
+        const infoEl = document.getElementById('app-info');
+        try {
+            const info = await apiGet('/api/app_info');
+            const validity = info.config_valid
+                ? '<span class="value yes">Valid</span>'
+                : '<span class="value state-not_authenticated">Invalid \u2014 ' +
+                  escapeHtml(info.config_error || '') + '</span>';
+            infoEl.innerHTML =
+                '<div class="provider-row"><span class="label">Version</span>' +
+                '<span class="value">' + escapeHtml(info.version) + '</span></div>' +
+                '<div class="provider-row"><span class="label">Configuration</span>' +
+                validity + '</div>';
+        } catch (err) {
+            infoEl.textContent = 'Could not load application info: ' + err.message;
+        }
+    }
+
     // -- Boot -------------------------------------------------------------------------------
     initAppearance();
     initWorkspace();
@@ -937,6 +1059,7 @@ pre.report {
     loadTeamSummary();
     initExecutionAndTerminal();
     initBudgetDisplay();
+    initSafety();
     </script>
 </body>
 </html>

@@ -271,5 +271,52 @@ class TestCockpitBudgetDisplay(unittest.TestCase):
         self.assertIn("'hidden'", self.page)
 
 
+class TestSafetyDiagnosticsSection(unittest.TestCase):
+    def setUp(self):
+        self.page = (WEB_DIR / "settings.html").read_text(encoding="utf-8")
+
+    def test_has_credential_handling_explanation(self):
+        self.assertIn("never reads, stores, or transmits a credential", self.page)
+
+    def test_has_doctor_and_diagnostics_buttons(self):
+        self.assertIn('id="run-doctor-btn"', self.page)
+        self.assertIn('id="generate-diagnostics-btn"', self.page)
+
+    def test_has_a_check_providers_control(self):
+        self.assertIn('id="check-providers-btn"', self.page)
+
+    def test_fetches_app_info(self):
+        self.assertIn("/api/app_info", self.page)
+
+    def test_reads_doctor_and_diagnostics_from_their_own_routes(self):
+        self.assertIn("/api/doctor", self.page)
+        self.assertIn("/api/diagnostics", self.page)
+
+    def test_renders_report_text_escaped(self):
+        # Doctor and diagnostics text comes from provider CLIs by way of preflight; it reaches
+        # innerHTML, so it must go through escapeHtml first, exactly as provider cards do.
+        self.assertIn("escapeHtml(data.text)", self.page)
+
+    def test_never_names_a_credential_store_or_field(self):
+        # The words "secret" and "bearer" do appear, in the sentence explaining what the
+        # redaction filter scrubs - that is the guarantee, not a leak. What must never appear
+        # is an identifier that names a credential, a credential file, or a keyring: those
+        # would mean the page had started handling one.
+        lowered = self.page.lower()
+        for banned in ("api_key", "apikey", "api-key", "auth.json", "credentials.json",
+                       "keyring", "keychain", "password", "access_token", "refresh_token",
+                       "client_secret", "private_key", ".netrc", "authorization:"):
+            self.assertNotIn(banned, lowered, f"{banned!r} must never appear on this page")
+
+    def test_has_no_input_that_could_collect_a_secret(self):
+        self.assertNotIn('type="password"', self.page)
+
+    def test_sends_the_daemon_token_only_as_a_header(self):
+        # The launch token reaches the page in the document and goes back in a header. A
+        # query-string token would put it in history and in any referrer.
+        self.assertIn("'X-Orchestrator-Token': TOKEN", self.page)
+        self.assertNotIn("token=", self.page)
+
+
 if __name__ == "__main__":
     unittest.main()
