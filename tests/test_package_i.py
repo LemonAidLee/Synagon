@@ -270,15 +270,87 @@ class TestPrunePlanRoute(_SettingsDaemonCase):
 
 
 class TestPruneExecuteRoute(_SettingsDaemonCase):
-    def test_post_passes_the_plan_through_unchanged(self):
-        plan = {"available": True, "prunable": [{"branch": "run/x"}]}
-        with patch(
-            "orchestrator.prune.execute_prune", return_value={"deleted": [], "failed": []}
-        ) as mock_exec:
-            status, body = self._post("/api/prune/execute", {"plan": plan})
+    """`delete_branch` is `git branch -D`, so what reaches it has to be re-checked here.
+
+    The plan comes from the page, which may have drawn it minutes earlier. These tests pin
+    the contract the design spec asked for: a branch is deleted only if the planner still
+    says it may be, and a plan that drifted - or was never the planner's - deletes nothing.
+    """
+
+    FRESH = {
+        "available": True,
+        "older_than_seconds": 86400,
+        "keep_failed": False,
+        "merged_older_than_seconds": None,
+        "prunable": [{"branch": "run/still-ok", "worktree": None, "age_seconds": 99999}],
+        "kept": [{"branch": "run/now-busy", "keep_reason": "checked out in the main repository"}],
+    }
+
+    def test_post_deletes_a_branch_the_planner_still_lists(self):
+        submitted = {
+            "available": True, "older_than_seconds": 86400, "keep_failed": False,
+            "prunable": [{"branch": "run/still-ok"}],
+        }
+        with patch("orchestrator.prune.plan_prune", return_value=self.FRESH), \
+             patch("orchestrator.prune.execute_prune",
+                   return_value={"deleted": [{"branch": "run/still-ok"}], "failed": []}) as ex:
+            status, body = self._post("/api/prune/execute", {"plan": submitted})
         self.assertEqual(status, 200)
-        mock_exec.assert_called_once()
-        self.assertEqual(mock_exec.call_args.args[1], plan)
+        self.assertEqual([d["branch"] for d in body["deleted"]], ["run/still-ok"])
+        self.assertEqual(body["refused"], [])
+        # The server's own candidate is what was executed, not the submitted stub.
+        self.assertEqual(ex.call_args.args[1]["prunable"], self.FRESH["prunable"])
+
+    def test_post_refuses_a_branch_that_stopped_being_prunable(self):
+        """Previewed, then checked out before the click. It must survive, with the reason."""
+        submitted = {
+            "available": True, "older_than_seconds": 86400, "keep_failed": False,
+            "prunable": [{"branch": "run/now-busy"}],
+        }
+        with patch("orchestrator.prune.plan_prune", return_value=self.FRESH), \
+             patch("orchestrator.prune.execute_prune") as ex:
+            status, body = self._post("/api/prune/execute", {"plan": submitted})
+        self.assertEqual(status, 200)
+        ex.assert_not_called()
+        self.assertEqual(body["deleted"], [])
+        self.assertEqual(
+            body["refused"], [{"branch": "run/now-busy",
+                               "error": "checked out in the main repository"}]
+        )
+
+    def test_post_refuses_a_branch_the_planner_never_named(self):
+        """A fabricated plan naming any other branch - main included - deletes nothing."""
+        submitted = {
+            "available": True, "older_than_seconds": 86400, "keep_failed": False,
+            "prunable": [{"branch": "main"}, {"branch": "run/still-ok"}],
+        }
+        with patch("orchestrator.prune.plan_prune", return_value=self.FRESH), \
+             patch("orchestrator.prune.execute_prune",
+                   return_value={"deleted": [{"branch": "run/still-ok"}], "failed": []}) as ex:
+            status, body = self._post("/api/prune/execute", {"plan": submitted})
+        self.assertEqual(status, 200)
+        executed = [c["branch"] for c in ex.call_args.args[1]["prunable"]]
+        self.assertEqual(executed, ["run/still-ok"])
+        self.assertNotIn("main", executed)
+        self.assertEqual([r["branch"] for r in body["refused"]], ["main"])
+
+    def test_post_deletes_nothing_when_the_repository_cannot_be_planned(self):
+        unavailable = {"available": False, "reason": "git is not installed or not on PATH"}
+        submitted = {"available": True, "prunable": [{"branch": "run/x"}]}
+        with patch("orchestrator.prune.plan_prune", return_value=unavailable), \
+             patch("orchestrator.prune.execute_prune") as ex:
+            status, body = self._post("/api/prune/execute", {"plan": submitted})
+        self.assertEqual(status, 200)
+        ex.assert_not_called()
+        self.assertEqual(body["deleted"], [])
+        self.assertIn("git is not installed", body["error"])
+
+    def test_post_with_an_empty_plan_deletes_nothing(self):
+        with patch("orchestrator.prune.execute_prune") as ex:
+            status, body = self._post("/api/prune/execute", {"plan": {"prunable": []}})
+        self.assertEqual(status, 200)
+        ex.assert_not_called()
+        self.assertEqual(body["deleted"], [])
 
     def test_post_without_a_plan_is_a_400(self):
         status, body = self._post("/api/prune/execute", {})

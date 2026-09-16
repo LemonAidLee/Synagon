@@ -184,6 +184,12 @@ class TestWorkspaceSection(unittest.TestCase):
         self.assertIn('/api/prune/plan', self.page)
         self.assertIn('/api/prune/execute', self.page)
 
+    def test_prune_reports_branches_the_daemon_spared(self):
+        # The daemon re-checks the plan and may refuse part of it; a branch that survived
+        # because the repository moved is the outcome worth showing, not a silent count.
+        self.assertIn('result.refused', self.page)
+        self.assertIn('changed since the preview', self.page)
+
 
 class TestAgentsProvidersSection(unittest.TestCase):
     def setUp(self):

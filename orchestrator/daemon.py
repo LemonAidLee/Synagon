@@ -344,14 +344,74 @@ class Daemon:
         )
 
     def prune_execute(self, plan: Dict[str, Any]) -> Dict[str, Any]:
-        """Delete exactly the branches `plan` marked prunable. Never computes its own plan."""
-        from orchestrator.config import get_delivery_config
-        from orchestrator.prune import execute_prune
+        """Delete the branches `plan` marked prunable - those still prunable right now.
 
-        return execute_prune(
-            self.project_root, plan,
-            deliveries_directory=get_delivery_config(self.config).get("directory"),
+        The plan arrives from the page, which may have rendered it minutes ago, and
+        `workspace.delete_branch` is `git branch -D`: it does not ask. Between the preview
+        and the click a branch can be checked out, gain new commits, or have its worktree
+        dirtied - so the plan is re-derived here from the thresholds it recorded, and a
+        branch is deleted only if the fresh plan still lists it as prunable. Anything that
+        drifted comes back under `refused`, with the current reason for keeping it, and
+        nothing about it is touched.
+
+        Each confirmed entry is the *server's* freshly computed record, not the submitted
+        one, so a hand-edited plan cannot smuggle a worktree path or a delivery id past the
+        planner that decided the branch was safe to lose.
+        """
+        from orchestrator.config import get_delivery_config
+        from orchestrator.prune import execute_prune, plan_prune
+
+        deliveries = get_delivery_config(self.config).get("directory")
+        submitted = [c for c in (plan.get("prunable") or []) if isinstance(c, dict)]
+        empty: Dict[str, Any] = {"deleted": [], "failed": [], "refused": []}
+        if not submitted:
+            return empty
+
+        fresh = plan_prune(
+            self.project_root,
+            int(plan.get("older_than_seconds") or 0),
+            keep_failed=bool(plan.get("keep_failed")),
+            merged_older_than_seconds=plan.get("merged_older_than_seconds"),
+            deliveries_directory=deliveries,
         )
+        if not fresh.get("available"):
+            return {
+                "deleted": [], "failed": [],
+                "refused": [
+                    {"branch": c.get("branch"), "error": fresh.get("reason") or "unavailable"}
+                    for c in submitted
+                ],
+                "error": fresh.get("reason"),
+            }
+
+        still = {c.get("branch"): c for c in (fresh.get("prunable") or [])}
+        keep_reasons = {
+            c.get("branch"): c.get("keep_reason") for c in (fresh.get("kept") or [])
+        }
+
+        confirmed: List[Dict[str, Any]] = []
+        refused: List[Dict[str, Any]] = []
+        for candidate in submitted:
+            branch = candidate.get("branch")
+            if branch in still:
+                confirmed.append(still[branch])
+            else:
+                refused.append({
+                    "branch": branch,
+                    "error": keep_reasons.get(branch)
+                    or "it is no longer one of the branches this project may prune",
+                })
+
+        if not confirmed:
+            return {"deleted": [], "failed": [], "refused": refused}
+
+        result = execute_prune(
+            self.project_root,
+            {**fresh, "prunable": confirmed},
+            deliveries_directory=deliveries,
+        )
+        result["refused"] = refused
+        return result
 
     def doctor_report(self) -> Dict[str, Any]:
         """The same probe `--doctor` runs, for the settings page's diagnostics panel."""

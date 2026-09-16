@@ -886,10 +886,33 @@ pre.report {
                 body: JSON.stringify({ plan: lastPrunePlan }),
             });
             const result = await res.json();
-            const deleted = (result.deleted || []).length;
-            flashStatus('prune-status', true, `Deleted ${deleted} branch${deleted === 1 ? '' : 'es'}`);
+            const deleted = (result.deleted || []);
+            const refused = (result.refused || []);
+            const failed = (result.failed || []);
+            const plural = (n) => `${n} branch${n === 1 ? '' : 'es'}`;
+
+            // A branch the daemon spared is the interesting outcome, not a footnote: it means
+            // the repository moved between the preview and the click. Say which, and why.
+            const notes = [];
+            if (refused.length) {
+                notes.push('Kept ' + plural(refused.length) + ' that changed since the preview:');
+                for (const entry of refused) notes.push('  ' + entry.branch + ' \u2014 ' + entry.error);
+            }
+            if (failed.length) {
+                notes.push('Could not delete ' + plural(failed.length) + ':');
+                for (const entry of failed) notes.push('  ' + entry.branch + ' \u2014 ' + entry.error);
+            }
+            if (result.error) notes.push(result.error);
+
+            const output = document.getElementById('prune-plan-output');
+            output.textContent = notes.join('\n');
+            flashStatus(
+                'prune-status',
+                !refused.length && !failed.length,
+                'Deleted ' + plural(deleted.length)
+            );
+            // Any further deletion needs a fresh preview, because this one is now spent.
             lastPrunePlan = null;
-            document.getElementById('prune-plan-output').textContent = '';
             deleteBtn.textContent = 'Delete 0 branches';
         } catch (err) {
             flashStatus('prune-status', false, 'Could not delete: ' + err.message);

@@ -91,16 +91,16 @@ max_repair_attempts: 2
 # attempts that failed are recorded as their own `agent_retry` events instead, so
 # a retry is auditable rather than invisible.
 execution:
-  visible_terminals: true
-  terminal_type: antigravity_integrated
+  visible_terminals: false
+  terminal_type: console
   pause_on_completion: 1.5
   close_terminal_on_completion: false
   agent_execution_mode: auto
   retry:
-    attempts: 3
+    attempts: 7
     backoff_seconds: 2.0
     max_backoff_seconds: 30.0
-    escalate_model: true
+    escalate_model: false
 
 # ------------------------------------------------------------------------------
 # Global Skill Discovery & Access Configuration (Stage 7.7)
@@ -164,7 +164,7 @@ preflight:
 run_store:
   enabled: true
   directory: .orchestrator/runs
-  max_output_chars: 0
+  max_output_chars: 20000
 
 # ------------------------------------------------------------------------------
 # Workspace Isolation (Tier 0 #3)
@@ -324,7 +324,7 @@ planning:
 # already in flight is never killed mid-way.
 budget:
   max_total_tokens: 0
-  max_duration_seconds: 0
+  max_duration_seconds: 3600
   goal_max_total_tokens: 0
   goal_max_duration_seconds: 0
 
