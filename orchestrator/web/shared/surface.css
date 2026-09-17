@@ -1,0 +1,56 @@
+/* orchestrator/web/shared/surface.css
+   The office and the design surface were built before the themes existed, with their own
+   vocabulary: --ink for body text, --line for borders, --panel-2 for a raised surface,
+   --ok/--warn/--bad for status. The cockpit and the settings page use the palette's own
+   names instead (--text, --green/--amber/--red, --cyan).
+
+   Rather than rename several hundred references across two pages, this file says what each
+   of those older names means in terms of the palette. Both pages link theme.css and then
+   this, so picking a theme restyles them too, and there is still only one place where a
+   color is actually defined.
+
+   Only names theme.css does NOT define appear here. Redefining one of its own (--dim, say)
+   would be inherited by the cockpit through the same stylesheet and change what a border
+   looks like there.
+
+   Declared on `body`, not `:root`, and that matters: a custom property is resolved against
+   the cascaded values of the element that declares it, and theme.css puts each palette on
+   `body.theme-*`. On `:root` (<html>) `var(--text)` would resolve against the Srcery
+   defaults in `:root, body.theme-srcery` and freeze there - which is exactly what it did,
+   silently, until a browser was pointed at it. */
+body {
+    /* Body text and its quieter companion. */
+    --ink: var(--text);
+
+    /* The surface ramp. theme.css gives four steps from darkest to lightest - the page
+       background, a panel on it, and the two scrollbar tones above that - which is exactly
+       the ramp these pages were drawn against (#10131a / #171b24 / #1e2430 / #2a3243). */
+    --panel-2: var(--scrollbar-thumb);
+    --line: var(--scrollbar-thumb-hover);
+
+    /* Status and accent, straight across. */
+    --accent: var(--cyan);
+    --ok: var(--green);
+    --warn: var(--amber);
+    --bad: var(--red);
+
+    /* A border in the status color: enough of it to read as that status, sitting on the
+       panel rather than glowing off it. Replaces the hand-picked #24603c / #6b4d12 /
+       #6b2222 borders, which were only correct against the one background they were
+       chosen for. */
+    --ok-line: color-mix(in srgb, var(--ok) 45%, var(--panel));
+    --warn-line: color-mix(in srgb, var(--warn) 45%, var(--panel));
+    --bad-line: color-mix(in srgb, var(--bad) 45%, var(--panel));
+    --accent-line: color-mix(in srgb, var(--accent) 45%, var(--panel));
+
+    /* A tinted fill for a selected or highlighted row, for the same reason. */
+    --accent-fill: color-mix(in srgb, var(--accent) 18%, var(--panel));
+    --ok-fill: color-mix(in srgb, var(--ok) 18%, var(--panel));
+    --bad-fill: color-mix(in srgb, var(--bad) 18%, var(--panel));
+
+    /* Deliberately NOT palette-derived: a person is a person in every theme. This marks a
+       human role on the design surface, next to the agent roles the office paints from its
+       own ROLE_COLORS - identity, not chrome. Miasma has no purple to offer it, and a role
+       that changed color with the theme would stop being recognizable. */
+    --person: #c084fc;
+}

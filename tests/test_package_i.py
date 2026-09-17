@@ -358,6 +358,142 @@ class TestPruneExecuteRoute(_SettingsDaemonCase):
         self.assertFalse(body["ok"])
 
 
+class TestOfficeAndDesignAreThemed(unittest.TestCase):
+    """The office and the design surface carried their own palette until Package I.
+
+    A theme chosen from the desktop Settings menu persisted but restyled nothing while one of
+    them was open - and `startup_view: office` makes that the first thing a project shows.
+    """
+
+    def setUp(self):
+        from orchestrator.serve import WEB_DIR
+
+        self.web = WEB_DIR
+        self.pages = {
+            name: (WEB_DIR / ("%s.html" % name)).read_text(encoding="utf-8")
+            for name in ("office", "design")
+        }
+
+    def test_both_link_the_shared_palette_and_the_bridge(self):
+        for name, page in self.pages.items():
+            self.assertIn('href="/shared/theme.css"', page, name)
+            self.assertIn('href="/shared/surface.css"', page, name)
+
+    def test_neither_defines_a_palette_of_its_own(self):
+        import re
+
+        for name, page in self.pages.items():
+            css = page[page.find("<style>"):page.find("</style>")]
+            leftover = re.findall(r"#[0-9a-fA-F]{3,8}\b", css)
+            self.assertEqual(leftover, [], "%s.html CSS still hardcodes %s" % (name, leftover))
+
+    def test_both_expose_the_apply_theme_contract_the_menu_calls(self):
+        # desktop/main.js applies a menu choice with
+        # `window.__applyTheme && window.__applyTheme(id)`, so a page without it is a page
+        # the Theme menu silently does nothing to.
+        for name, page in self.pages.items():
+            self.assertIn("window.__applyTheme", page, name)
+            for theme in ("theme-srcery", "theme-moonfly", "theme-jellybeans",
+                          "theme-tender", "theme-miasma"):
+                self.assertIn(theme, page, "%s.html does not know %s" % (name, theme))
+
+    def test_both_read_the_saved_theme_but_tolerate_no_daemon(self):
+        # Under `--serve` / `--design` there is no /api/preferences. The read has to fail
+        # soft and leave the stylesheet's default in place.
+        for name, page in self.pages.items():
+            self.assertIn("/api/preferences", page, name)
+            self.assertIn("catch", page, name)
+
+    def test_the_bridge_only_defines_names_the_palette_does_not(self):
+        """Redefining one of theme.css's own names would follow it into the cockpit."""
+        import re
+
+        theme = (self.web / "shared" / "theme.css").read_text(encoding="utf-8")
+        surface = (self.web / "shared" / "surface.css").read_text(encoding="utf-8")
+        declared = lambda css: set(re.findall(r"^\s*(--[a-z0-9-]+)\s*:", css, re.M))
+        clash = declared(theme) & declared(surface)
+        self.assertEqual(clash, set(), "surface.css redefines palette names: %s" % clash)
+
+    def test_the_office_canvas_paints_from_the_palette(self):
+        page = self.pages["office"]
+        self.assertIn("readPalette", page)
+        self.assertIn("PALETTE.panel", page)
+        # Repainting on a theme change is what makes the scene follow the menu.
+        self.assertIn("readPalette();", page)
+
+    def test_role_and_figure_colors_stay_fixed_on_purpose(self):
+        """A role's color identifies it; it is not chrome, and Miasma has no pink to offer."""
+        page = self.pages["office"]
+        self.assertIn("ROLE_COLORS", page)
+        self.assertIn("#f0abfc", page)  # decomposer
+        surface = (self.web / "shared" / "surface.css").read_text(encoding="utf-8")
+        self.assertIn("--person: #c084fc", surface)
+
+    def test_the_office_reads_the_token_before_it_uses_it(self):
+        """`const TOKEN` is in the temporal dead zone until its own line runs."""
+        page = self.pages["office"]
+        self.assertLess(page.index("const TOKEN"), page.index("window.__applyTheme"))
+
+
+class TestSharedAssetsServedWithoutADaemon(unittest.TestCase):
+    """`serve.py` serves the office and the design surface too.
+
+    The stylesheet they link has to resolve under that handler as well, or both pages render
+    with no colors at all outside the desktop shell.
+    """
+
+    def setUp(self):
+        import shutil
+        import tempfile
+
+        from orchestrator.serve import serve_board
+
+        self.root = tempfile.mkdtemp(prefix="orch_pkgi_serve_")
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+        config = {
+            "agents": [{"agent": "claude", "role": "implementer"}],
+            "roles": {"implementer": {"responsibility": "write the code"}},
+        }
+        self.server = serve_board(
+            self.root, config, port=0, open_browser=False, printer=lambda *_: None,
+            serve_forever=False,
+        )
+        self.base = "http://127.0.0.1:%d" % self.server.server_address[1]
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+
+    def _get(self, path):
+        try:
+            with urllib.request.urlopen(self.base + path, timeout=5) as response:
+                return response.status, response.read()
+        except urllib.error.HTTPError as exc:
+            return exc.code, exc.read()
+
+    def test_theme_css_is_served(self):
+        status, body = self._get("/shared/theme.css")
+        self.assertEqual(status, 200)
+        self.assertIn(b"theme-moonfly", body)
+
+    def test_surface_css_is_served(self):
+        status, body = self._get("/shared/surface.css")
+        self.assertEqual(status, 200)
+        self.assertIn(b"--ink", body)
+
+    def test_the_office_it_serves_links_something_that_resolves(self):
+        status, body = self._get("/office")
+        self.assertEqual(status, 200)
+        page = body.decode("utf-8")
+        for href in ("/shared/theme.css", "/shared/surface.css"):
+            self.assertIn(href, page)
+            self.assertEqual(self._get(href)[0], 200, "%s 404s under serve.py" % href)
+
+    def test_it_is_an_allow_list_not_a_file_server(self):
+        for probe in ("/shared/../orchestrator.yaml", "/shared/nope.css", "/shared/"):
+            self.assertEqual(self._get(probe)[0], 404, probe)
+
+
 class TestSharedThemeRoute(_SettingsDaemonCase):
     def test_get_serves_theme_css(self):
         status, _ = self._get_raw("/shared/theme.css")

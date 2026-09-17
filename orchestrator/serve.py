@@ -76,6 +76,19 @@ from orchestrator.teams import (
 
 WEB_DIR = Path(__file__).parent / "web"
 
+#: Static assets shared by more than one page - the five theme palettes, and the vocabulary
+#: bridge that lets the office and the design surface use them. Served from an explicit
+#: allow-list rather than by walking a directory, for the same reason `daemon.VENDORED_FILES`
+#: is: a path join under a directory is how a static-file server becomes a disclosure bug.
+#:
+#: Defined here, not in `daemon.py`, because the office and the design surface are served by
+#: this module too (`--serve`, `--design`). A stylesheet those pages link has to resolve under
+#: both handlers, or they render with no colors at all outside the desktop shell.
+SHARED_FILES = {
+    "theme.css": "text/css; charset=utf-8",
+    "surface.css": "text/css; charset=utf-8",
+}
+
 #: How many recent events the office replays when a browser first connects.
 INITIAL_EVENT_WINDOW = 200
 
@@ -473,8 +486,24 @@ def make_handler(
                     status=500,
                 )
 
+        def _shared(self, name: str) -> None:
+            """Serve one shared static asset, by name, from a fixed list."""
+            if name not in SHARED_FILES:
+                self._send(b"Not found", "text/plain; charset=utf-8", status=404)
+                return
+            try:
+                body = (WEB_DIR / "shared" / name).read_bytes()
+            except Exception:
+                self._send(b"Not found", "text/plain; charset=utf-8", status=404)
+                return
+            self._send(body, SHARED_FILES[name])
+
         def do_GET(self) -> None:  # noqa: N802
             route = urlparse(self.path).path
+
+            if route.startswith("/shared/"):
+                self._shared(route[len("/shared/"):])
+                return
 
             if route in ("/", "/index.html", "/office"):
                 self._page("office.html")

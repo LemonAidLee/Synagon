@@ -4,23 +4,20 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="orchestrator-token" content="__ORCHESTRATOR_TOKEN__">
+<link rel="stylesheet" href="/shared/theme.css">
+<link rel="stylesheet" href="/shared/surface.css">
 <title>Design the team — AI Orchestrator</title>
 <style>
-  :root {
-    --bg: #10131a;
-    --panel: #171b24;
-    --panel-2: #1e2430;
-    --line: #2a3243;
-    --ink: #e6e9f0;
-    --dim: #8b93a7;
-    --accent: #6ea8fe;
-    --ok: #4ade80;
-    --warn: #fbbf24;
-    --bad: #f87171;
-    --person: #c084fc;
-  }
+  /* Colors come from /shared/theme.css (the five palettes) plus /shared/surface.css
+     (which says what this page's older names - --ink, --line, --panel-2, --ok/--warn/--bad -
+     mean in palette terms). Nothing here defines a color of its own, so picking a theme from
+     the desktop Settings menu restyles this page too. */
   * { box-sizing: border-box; }
-  html, body {
+  html { margin: 0; height: 100%; }
+  /* Background on body alone, not on html: the palette class lives on body, so a background
+     set on html would stay Srcery in every other theme. With no background on the root, CSS
+     propagates body's to the viewport canvas, which is what should happen anyway. */
+  body {
     margin: 0; height: 100%;
     background: var(--bg); color: var(--ink);
     font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -35,11 +32,11 @@
   header .spacer { flex: 1; }
   .pill {
     font-size: 12px; padding: 3px 10px; border-radius: 999px;
-    border: 1px solid var(--line); background: var(--panel-2); color: var(--dim);
+    border: 1px solid var(--line); background: var(--panel-2); color: var(--text-dim);
   }
-  .pill.ok { color: var(--ok); border-color: #24603c; }
-  .pill.bad { color: var(--bad); border-color: #6b2222; }
-  .pill.dirty { color: var(--warn); border-color: #6b4d12; }
+  .pill.ok { color: var(--ok); border-color: var(--ok-line); }
+  .pill.bad { color: var(--bad); border-color: var(--bad-line); }
+  .pill.dirty { color: var(--warn); border-color: var(--warn-line); }
 
   button, select, input {
     font: inherit; color: var(--ink);
@@ -49,8 +46,10 @@
   button { cursor: pointer; }
   button:hover:not(:disabled) { border-color: var(--accent); }
   button:disabled { opacity: .45; cursor: not-allowed; }
-  button.primary { background: #1d3557; border-color: #2f5c96; color: #dbe9ff; }
-  button.primary:hover:not(:disabled) { background: #234168; }
+  button.primary { background: var(--accent-fill); border-color: var(--accent-line);
+    color: var(--text); }
+  button.primary:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--accent) 30%, var(--panel)); }
   button.tiny { padding: 1px 7px; font-size: 12px; border-radius: 6px; }
   button.danger:hover:not(:disabled) { border-color: var(--bad); color: var(--bad); }
 
@@ -59,7 +58,7 @@
 
   .pipeline { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; }
   .arrow {
-    align-self: center; color: var(--dim); padding: 0 10px; font-size: 20px; user-select: none;
+    align-self: center; color: var(--text-dim); padding: 0 10px; font-size: 20px; user-select: none;
   }
   .phase {
     background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
@@ -69,7 +68,7 @@
   .phase-head { display: flex; align-items: center; gap: 6px; margin-bottom: 10px; }
   .phase-role {
     font-size: 12px; letter-spacing: .1em; text-transform: uppercase;
-    color: var(--dim); font-weight: 600; flex: 1;
+    color: var(--text-dim); font-weight: 600; flex: 1;
   }
   .phase-head .parallel { color: var(--person); font-size: 11px; }
 
@@ -79,7 +78,7 @@
   }
   .agent.selected { border-color: var(--accent); }
   .agent .name { font-weight: 600; }
-  .agent .model { color: var(--dim); font-size: 12px; word-break: break-all; }
+  .agent .model { color: var(--text-dim); font-size: 12px; word-break: break-all; }
   .agent .ladder { color: var(--person); font-size: 11px; }
 
   .addphase {
@@ -93,27 +92,27 @@
   .section { padding: 14px 16px; border-bottom: 1px solid var(--line); }
   .section h2 {
     margin: 0 0 10px; font-size: 11px; letter-spacing: .12em;
-    text-transform: uppercase; color: var(--dim); font-weight: 600;
+    text-transform: uppercase; color: var(--text-dim); font-weight: 600;
   }
   .field { display: grid; gap: 4px; margin-bottom: 10px; }
-  .field label { font-size: 12px; color: var(--dim); }
+  .field label { font-size: 12px; color: var(--text-dim); }
   .field select, .field input { width: 100%; }
   .row { display: flex; gap: 6px; align-items: center; }
   .row select { flex: 1; min-width: 0; }
-  .hint { color: var(--dim); font-size: 12px; margin: 6px 0 0; }
+  .hint { color: var(--text-dim); font-size: 12px; margin: 6px 0 0; }
   .evidence { font-size: 11px; margin: 2px 0 0; line-height: 1.4; }
-  .evidence.good { color: var(--ok, #2e7d32); }
-  .evidence.poor { color: var(--bad, #b3261e); }
-  .evidence.thin { color: var(--dim); }
+  .evidence.good { color: var(--ok); }
+  .evidence.poor { color: var(--bad); }
+  .evidence.thin { color: var(--text-dim); }
   .agent .evidence { margin-top: 3px; }
   .problem { color: var(--warn); font-size: 13px; margin: 0 0 6px; }
   .problem::before { content: "! "; color: var(--bad); }
   pre {
-    margin: 0; padding: 10px; background: #0c0f15; border: 1px solid var(--line);
+    margin: 0; padding: 10px; background: var(--bg); border: 1px solid var(--line);
     border-radius: 8px; overflow: auto; max-height: 260px;
-    font: 12px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; color: #c8d3e6;
+    font: 12px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; color: var(--text);
   }
-  .empty { color: var(--dim); padding: 40px; text-align: center; }
+  .empty { color: var(--text-dim); padding: 40px; text-align: center; }
 </style>
 </head>
 <body>
@@ -189,6 +188,37 @@ const el = (id) => document.getElementById(id);
 const tokenMeta = document.querySelector('meta[name="orchestrator-token"]');
 const rawToken = tokenMeta ? tokenMeta.getAttribute("content") : "";
 const TOKEN = (rawToken && rawToken.indexOf("__") !== 0) ? rawToken : "";
+
+// Same contract as the cockpit, the settings page and the office, so the desktop Theme menu
+// can apply a choice to whichever page happens to be open. Colors live in
+// /shared/theme.css; this only swaps which palette class the body carries.
+//
+// The design surface is also served read-only by `--design`, where /api/preferences does not
+// exist: the read below 404s, the write is fire-and-forget, and the page keeps the
+// stylesheet's default in both cases.
+window.__applyTheme = function (themeId, opts) {
+  const persist = !opts || opts.persist !== false;
+  document.body.classList.remove(
+    "theme-srcery", "theme-miasma", "theme-tender", "theme-jellybeans", "theme-moonfly"
+  );
+  document.body.classList.add(themeId);
+  if (persist) {
+    fetch("/api/preferences", {
+      method: "POST",
+      headers: { "X-Orchestrator-Token": TOKEN, "Content-Type": "application/json" },
+      body: JSON.stringify({ theme: themeId }),
+    }).catch(() => {});
+  }
+};
+
+(async () => {
+  try {
+    const res = await fetch("/api/preferences", { headers: { "X-Orchestrator-Token": TOKEN } });
+    if (!res.ok) return;
+    const prefs = await res.json();
+    if (prefs && prefs.theme) window.__applyTheme(prefs.theme, { persist: false });
+  } catch (err) { /* no daemon, or no token: keep the default */ }
+})();
 
 function authHeaders(extra) {
   const headers = Object.assign({}, extra || {});
